@@ -19,18 +19,19 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build project
         run: npm run build
 
-      - name: Copy dist to VPS
+      - name: Copy files to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: "dist/*,package.json"
+          passphrase: ${{ secrets.VPS_SSH_PASSPHRASE }}
+          source: "dist,package.json"
           target: "/server/back_node"
 
       - name: Deploy with PM2
@@ -39,16 +40,16 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          passphrase: ${{ secrets.VPS_SSH_PASSPHRASE }}
           script: |
             cd /server/back_node
 
             echo "${{ secrets.ENV_FILE }}" > .env
 
-            npm install --production
+            npm ci --omit=dev
 
             pm2 stop back_chat || true
             pm2 delete back_chat || true
 
             pm2 start dist/main.js --name back_chat
-
             pm2 save
