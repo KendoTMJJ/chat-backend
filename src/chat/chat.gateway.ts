@@ -13,16 +13,13 @@ import { randomUUID } from 'crypto';
 import { ChatService } from './chat.service';
 import { N8nService } from './n8n/n8n.service';
 
-// Canales de contacto entregados al escalar
-const ESCALATION_CHANNELS = {
-  whatsapp: process.env.ESCALATION_WHATSAPP ?? '+57 300 000 0000',
-  email: process.env.ESCALATION_EMAIL ?? 'posgrados@usta.edu.co',
-};
+type ChatContext = 'posgrados' | 'mesa_ayuda';
 
 type IncomingClientMessage =
   | string
   | {
       message: string;
+      context?: ChatContext;
       meta?: {
         source?: 'text' | 'quick_reply';
         optionId?: string;
@@ -38,21 +35,41 @@ type IncomingClientMessage =
  */
 type EscalationState = 'none' | 'awaiting_reason' | 'done';
 
+// type SessionState = {
+//   firstUserMessageSeen: boolean;
+//   tabId: string;
+//   userId: string;
+//   chatSessionId: string;
+//   lastSeenAt: number;
+//   sockets: Set<string>;
+//   expired: boolean;
+//   persisting: boolean;
+//   conversationId: string | null;
+//   history: Array<{ userId: string; sender: 'user' | 'bot'; message: string }>;
+//   idleTimer?: NodeJS.Timeout;
+
+//   // ── Escalado ─────────────────────────────────────────────────────────
+//   escalationState: EscalationState;
+// };
+
 type SessionState = {
   firstUserMessageSeen: boolean;
   tabId: string;
   userId: string;
   chatSessionId: string;
   lastSeenAt: number;
-  sockets: Set<string>;
   welcomeSent: boolean;
+  sockets: Set<string>;
   expired: boolean;
   persisting: boolean;
   conversationId: string | null;
   history: Array<{ userId: string; sender: 'user' | 'bot'; message: string }>;
   idleTimer?: NodeJS.Timeout;
 
-  // ── Escalado ─────────────────────────────────────────────────────────
+  // ── Contexto elegido por el usuario en la pantalla de bienvenida ──────
+  context: ChatContext | null;
+
+  // ── Escalado ──────────────────────────────────────────────────────────
   escalationState: EscalationState;
 };
 
@@ -102,10 +119,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private normalizeIncoming(body: IncomingClientMessage) {
     if (typeof body === 'string') {
-      return { message: body, meta: { source: 'text' as const } };
+      return {
+        message: body,
+        context: null as ChatContext | null,
+        meta: { source: 'text' as const },
+      };
     }
     return {
       message: body?.message ?? '',
+      context: body?.context ?? null,
       meta: body?.meta ?? { source: 'text' as const },
     };
   }
@@ -129,11 +151,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       chatSessionId: randomUUID(),
       lastSeenAt: this.now(),
       sockets: new Set(),
-      welcomeSent: false,
       expired: false,
+      welcomeSent: false,
       persisting: false,
       conversationId: null,
       history: [],
+      context: null,
       escalationState: 'none',
     };
 
@@ -168,43 +191,39 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  /**
-   * Emite la señal para que el front muestre el botón de escalado.
-   * El front decide cómo renderizarlo; el back solo envía la señal.
-   *
-   * Evento: 'show-escalate-button'
-   * Payload: { message: string }  ← texto de acompañamiento
-   */
-  private emitEscalatePrompt(session: SessionState, message: string) {
-    this.server.to(session.chatSessionId).emit('show-escalate-button', {
-      message,
-    });
-  }
-
   // ──────────────────────────────────────────────────────────────────────
   // Flujo de escalado
   // ──────────────────────────────────────────────────────────────────────
 
   /**
-   * Inicia el flujo de escalado: pide al usuario que describa su problema.
+   * Inicia el flujo de escalado.
    * Llamado desde dos caminos:
    *   A) n8n envía resolved: false  → handleBotReply
    *   B) Usuario toca el botón      → handleMessage (optionId: 'escalate')
+   *
+   * El back solo emite la señal 'show-escalate-button'.
+   * n8n es quien genera y envía el texto "describe tu problema" por /chat/bot-reply.
    */
   private async startEscalationFlow(session: SessionState) {
     if (session.escalationState === 'done') return;
 
     session.escalationState = 'awaiting_reason';
 
-    await this.emitBotMessage(
-      session,
-      '📝 Para que un asesor pueda revisar tu caso, por favor **describe brevemente tu consulta o problema**:',
-    );
+    // Señal al front para que ajuste su estado (deshabilitar chips, etc.)
+    this.server.to(session.chatSessionId).emit('show-escalate-button', {});
+
+    // n8n genera y envía el texto "describe tu problema" por /chat/bot-reply
+    await this.n8nService.notifyEscalation('escalation_start', {
+      chatSessionId: session.chatSessionId,
+      userId: session.userId,
+      conversationId: session.conversationId,
+      context: session.context ?? undefined,
+    });
   }
 
   /**
-   * Recibe el motivo escrito por el usuario, escala en BD y confirma
-   * con los canales de contacto.
+   * Recibe el motivo del usuario, persiste en BD y notifica a n8n
+   * para que genere la confirmación con los canales de contacto.
    */
   private async handleEscalationReason(session: SessionState, reason: string) {
     session.escalationState = 'done';
@@ -226,26 +245,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (s) s.join(conversation.codConversation);
       }
 
-      // Notificar al front (puede usar esto para cambiar UI si quiere)
+      // Señal al front: la conversación fue escalada y guardada en BD
       this.server.to(session.chatSessionId).emit('chat-escalated', {
         conversationId: conversation.codConversation,
       });
 
-      // Confirmación al usuario con canales de contacto
-      await this.emitBotMessage(
-        session,
-        `✅ **Tu consulta ha sido registrada.**\n\n` +
-          `Un asesor revisará tu caso a la brevedad. Puedes contactarnos directamente por:\n\n` +
-          `📱 **WhatsApp:** ${ESCALATION_CHANNELS.whatsapp}\n` +
-          `📧 **Correo:** ${ESCALATION_CHANNELS.email}\n\n` +
-          `_Menciona tu consulta al contactarnos para una atención más rápida._`,
-      );
+      // n8n genera y envía la confirmación con canales por /chat/bot-reply
+      await this.n8nService.notifyEscalation('escalation_done', {
+        chatSessionId: session.chatSessionId,
+        userId: session.userId,
+        conversationId: conversation.codConversation,
+        context: session.context ?? undefined,
+        reason: reason.trim(),
+      });
     } catch {
-      await this.emitBotMessage(
-        session,
-        '⚠️ Ocurrió un error al registrar tu consulta. Por favor intenta de nuevo o contáctanos directamente.',
-      );
-      // Permitir reintento
+      // Permitir reintento si falla la persistencia
       session.escalationState = 'none';
     }
   }
@@ -328,7 +342,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() body: IncomingClientMessage,
     @ConnectedSocket() client: Socket,
   ) {
-    const { message, meta } = this.normalizeIncoming(body);
+    const { message, context, meta } = this.normalizeIncoming(body);
     if (!message?.trim()) return;
 
     const userId = client.data.userId as string;
@@ -346,11 +360,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    // Registrar context en sesión la primera vez que llega
+    if (context && !session.context) {
+      session.context = context;
+    }
+
+    // Ignorar el mensaje interno de selección de contexto:
+    // solo sirve para registrar el context en sesión, no va al historial ni a n8n.
+    if (message.startsWith('context_selected:')) return;
+
     const isFirstTurn = !session.firstUserMessageSeen;
     session.firstUserMessageSeen = true;
     this.touchSession(session);
 
-    // Emitir mensaje del usuario
+    // Emitir mensaje del usuario al room
     const userPayload = {
       userId,
       name: 'Usuario',
@@ -384,8 +407,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     // ── Camino B: usuario toca el botón "Hablar con un asesor" ──────────
-    // El front envía meta.optionId === 'escalate'.
-    // Se intercepta aquí antes de pasar a n8n.
     if (meta?.optionId === 'escalate') {
       await this.startEscalationFlow(session);
       return;
@@ -403,6 +424,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       userId,
       message,
       isFirstTurn,
+      context: session.context ?? undefined,
       meta,
     });
   }
@@ -415,7 +437,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     chatSessionId: string;
     message: string;
     resolved: boolean;
-    context?: 'posgrados' | 'mesa_ayuda';
+    context?: ChatContext;
   }) {
     const { chatSessionId, message, resolved } = data;
 
@@ -432,7 +454,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     await this.emitBotMessage(session, message);
 
     // ── Camino A: n8n determinó que la consulta NO fue resuelta ──────────
-    // Solo iniciamos el flujo si la sesión no fue escalada ya.
     if (!resolved && session.escalationState === 'none') {
       await this.startEscalationFlow(session);
     }
