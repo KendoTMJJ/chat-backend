@@ -15,8 +15,6 @@ export type EscalationEvent = 'escalation_start' | 'escalation_done';
 export class N8nService {
   private readonly logger = new Logger(N8nService.name);
 
-  // Un solo webhook maneja mensajes normales Y eventos de escalado.
-  // El Switch Evento en n8n los diferencia por el campo "event".
   private readonly webhookUrl = String(process.env.N8N_WEBHOOK_URL);
 
   // Mensajes normales del usuario → event implícito: 'message'

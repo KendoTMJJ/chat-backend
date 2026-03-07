@@ -12,6 +12,8 @@ import { Server, Socket } from 'socket.io';
 import { randomUUID } from 'crypto';
 import { ChatService } from './chat.service';
 import { N8nService } from './n8n/n8n.service';
+import { SupportChannelsService } from '../support-channels/support-channels.service';
+import { ChannelContext } from '../support-channels/entities/supportChannel';
 
 type ChatContext = 'posgrados' | 'mesa_ayuda';
 
@@ -34,23 +36,6 @@ type IncomingClientMessage =
  * 'done'            → ya se escaló, no volver a escalar en esta sesión
  */
 type EscalationState = 'none' | 'awaiting_reason' | 'done';
-
-// type SessionState = {
-//   firstUserMessageSeen: boolean;
-//   tabId: string;
-//   userId: string;
-//   chatSessionId: string;
-//   lastSeenAt: number;
-//   sockets: Set<string>;
-//   expired: boolean;
-//   persisting: boolean;
-//   conversationId: string | null;
-//   history: Array<{ userId: string; sender: 'user' | 'bot'; message: string }>;
-//   idleTimer?: NodeJS.Timeout;
-
-//   // ── Escalado ─────────────────────────────────────────────────────────
-//   escalationState: EscalationState;
-// };
 
 type SessionState = {
   firstUserMessageSeen: boolean;
@@ -81,6 +66,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly chatService: ChatService,
     private readonly n8nService: N8nService,
+    private readonly supportChannelsService: SupportChannelsService,
   ) {}
 
   private sessions = new Map<string, SessionState>();
@@ -201,8 +187,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    *   A) n8n envía resolved: false  → handleBotReply
    *   B) Usuario toca el botón      → handleMessage (optionId: 'escalate')
    *
-   * El back solo emite la señal 'show-escalate-button'.
-   * n8n es quien genera y envía el texto "describe tu problema" por /chat/bot-reply.
+   * n8n genera y envía el texto "describe tu problema" por /chat/bot-reply.
    */
   private async startEscalationFlow(session: SessionState) {
     if (session.escalationState === 'done') return;
@@ -222,8 +207,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /**
-   * Recibe el motivo del usuario, persiste en BD y notifica a n8n
-   * para que genere la confirmación con los canales de contacto.
+   * Recibe el motivo del usuario, persiste en BD, lee los canales de contacto
+   * desde SupportChannels y emite la confirmación directamente al usuario.
    */
   private async handleEscalationReason(session: SessionState, reason: string) {
     session.escalationState = 'done';
@@ -245,12 +230,33 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (s) s.join(conversation.codConversation);
       }
 
-      // Señal al front: la conversación fue escalada y guardada en BD
+      // Señal al front: conversación escalada y guardada en BD
       this.server.to(session.chatSessionId).emit('chat-escalated', {
         conversationId: conversation.codConversation,
       });
 
-      // n8n genera y envía la confirmación con canales por /chat/bot-reply
+      // Leer canales desde BD — filtra por contexto de la sesión
+      const ctx = (session.context ?? 'posgrados') as ChannelContext;
+      const allChannels =
+        await this.supportChannelsService.showSupportChannels();
+      const channel = allChannels.find((c) => c.context === ctx);
+
+      const whatsapp = channel?.whatsapp ?? '+57 300 000 0000';
+      const email = channel?.email ?? 'soporte@usta.edu.co';
+      const label =
+        ctx === ChannelContext.MESA_AYUDA ? 'Mesa de Ayuda' : 'Posgrados';
+      const verb = ctx === ChannelContext.MESA_AYUDA ? 'solicitud' : 'consulta';
+
+      await this.emitBotMessage(
+        session,
+        `✅ **Tu ${verb} ha sido registrada.**\n\n` +
+          `Un asesor de **${label}** revisará tu caso a la brevedad.\n\n` +
+          `📱 **WhatsApp:** ${whatsapp}\n` +
+          `📧 **Correo:** ${email}\n\n` +
+          `_Menciona tu ${verb} al contactarnos para una atención más rápida._`,
+      );
+
+      // Notificar a n8n — disponible para integraciones externas (CRM, email, etc.)
       await this.n8nService.notifyEscalation('escalation_done', {
         chatSessionId: session.chatSessionId,
         userId: session.userId,
@@ -258,8 +264,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         context: session.context ?? undefined,
         reason: reason.trim(),
       });
-    } catch {
-      // Permitir reintento si falla la persistencia
+    } catch (err) {
+      console.error(
+        '[handleEscalationReason] Error al escalar:',
+        err?.message ?? err,
+      );
       session.escalationState = 'none';
     }
   }

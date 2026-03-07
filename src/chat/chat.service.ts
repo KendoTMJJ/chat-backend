@@ -24,9 +24,9 @@ export class ChatService {
 
   public readonly TIMEOUT_MINUTES = 5;
 
-  constructor(private poolConexion: DataSource) {
-    this.messageRepository = poolConexion.getRepository(Message);
-    this.conversationRepository = poolConexion.getRepository(Conversation);
+  constructor(private poolConection: DataSource) {
+    this.messageRepository = poolConection.getRepository(Message);
+    this.conversationRepository = poolConection.getRepository(Conversation);
   }
 
   // =============================
