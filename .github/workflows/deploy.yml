@@ -45,9 +45,7 @@ jobs:
           script: |
             cd /server/back_node
 
-            cat > .env <<'EOF'
-            ${{ secrets.ENV_FILE }}
-            EOF
+            echo "${{ secrets.ENV_FILE }}" > .env
 
             npm ci --omit=dev
 
