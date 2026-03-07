@@ -45,12 +45,17 @@ jobs:
           script: |
             cd /server/back_node
 
-            echo "${{ secrets.ENV_FILE }}" > .env
+            cp package.json dist/package.json
+            cp package-lock.json dist/package-lock.json
+
+            cd dist
+
+            printf '%s' '${{ secrets.ENV_FILE }}' > .env
 
             npm ci --omit=dev
 
             pm2 stop back_chat || true
             pm2 delete back_chat || true
 
-            pm2 start dist/main.js --name back_chat
+            pm2 start main.js --name back_chat
             pm2 save
