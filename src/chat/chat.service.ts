@@ -1,4 +1,3 @@
-// src/chat/chat.service.ts
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { Message } from 'src/message/message';
 import {
@@ -12,6 +11,8 @@ export interface ConversationSummary {
   userId: string;
   status: ConversationStatus;
   title: string | null;
+  nombre: string | null;
+  correo: string | null;
   startedAt: Date;
   updatedAt: Date;
   lastMessage: string;
@@ -72,8 +73,7 @@ export class ChatService {
 
   // =============================
   // 📢 Escalar conversación
-  // Guarda el motivo como título y marca como ESCALATED.
-  // Si la sesión era efímera (sin conversationId), la crea primero
+  // Guarda nombre, correo y motivo. Si la sesión era efímera, la crea
   // y persiste todo el historial en BD.
   // =============================
   async escalateConversation(
@@ -81,6 +81,8 @@ export class ChatService {
     title: string,
     history: Array<{ userId: string; sender: 'user' | 'bot'; message: string }>,
     existingConversationId?: string | null,
+    nombre?: string,
+    correo?: string,
   ): Promise<Conversation> {
     let conversation: Conversation;
 
@@ -104,6 +106,8 @@ export class ChatService {
 
     await this.conversationRepository.update(conversation.codConversation, {
       title,
+      ...(nombre !== undefined && { nombre }),
+      ...(correo !== undefined && { correo }),
       status: ConversationStatus.ESCALATED,
       lastActivityAt: new Date(),
     });
@@ -111,6 +115,8 @@ export class ChatService {
     return {
       ...conversation,
       title,
+      nombre: nombre ?? null,
+      correo: correo ?? null,
       status: ConversationStatus.ESCALATED,
     };
   }
@@ -203,6 +209,8 @@ export class ChatService {
           userId: conversation.userId,
           status: conversation.status,
           title: conversation.title ?? null,
+          nombre: conversation.nombre ?? null,
+          correo: conversation.correo ?? null,
           startedAt: conversation.startedAt,
           updatedAt: conversation.lastActivityAt,
           lastMessage: lastMessage?.message || '',
@@ -227,5 +235,15 @@ export class ChatService {
       where: { userId, status: ConversationStatus.ACTIVE },
       order: { lastActivityAt: 'DESC' },
     });
+  }
+
+  // =============================
+  // 🗑️ Eliminar conversación y sus mensajes
+  // =============================
+  async deleteConversation(conversationId: string): Promise<void> {
+    await this.messageRepository.delete({
+      conversation: { codConversation: conversationId },
+    });
+    await this.conversationRepository.delete(conversationId);
   }
 }
