@@ -31,11 +31,20 @@ type IncomingClientMessage =
 /**
  * Estados del flujo de escalado en una sesión:
  *
- * 'none'            → flujo normal, sin escalado en curso
- * 'awaiting_reason' → el gateway preguntó el motivo, esperando respuesta del usuario
- * 'done'            → ya se escaló, no volver a escalar en esta sesión
+ * 'none'             → flujo normal, sin escalado en curso
+ * 'pending'          → se emitió show-escalate-button, esperando decisión del usuario
+ * 'awaiting_nombre'  → usuario confirmó escalar, esperando que escriba su nombre
+ * 'awaiting_correo'  → nombre recibido, esperando correo
+ * 'awaiting_reason'  → nombre y correo recibidos, esperando motivo/descripción
+ * 'done'             → ya se escaló, no volver a escalar en esta sesión
  */
-type EscalationState = 'none' | 'awaiting_reason' | 'done';
+type EscalationState =
+  | 'none'
+  | 'pending'
+  | 'awaiting_nombre'
+  | 'awaiting_correo'
+  | 'awaiting_reason'
+  | 'done';
 
 type SessionState = {
   firstUserMessageSeen: boolean;
@@ -51,11 +60,12 @@ type SessionState = {
   history: Array<{ userId: string; sender: 'user' | 'bot'; message: string }>;
   idleTimer?: NodeJS.Timeout;
 
-  // ── Contexto elegido por el usuario en la pantalla de bienvenida ──────
   context: ChatContext | null;
 
   // ── Escalado ──────────────────────────────────────────────────────────
   escalationState: EscalationState;
+  escalationNombre: string | null;
+  escalationCorreo: string | null;
 };
 
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -144,16 +154,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       history: [],
       context: null,
       escalationState: 'none',
+      escalationNombre: null,
+      escalationCorreo: null,
     };
 
     this.sessions.set(tabId, session);
     return session;
   }
 
-  /**
-   * Emite un mensaje del bot al room de la sesión y lo registra en el
-   * historial efímero (o en BD si la sesión ya persiste).
-   */
   private async emitBotMessage(session: SessionState, message: string) {
     const payload = {
       userId: 'bot',
@@ -182,33 +190,72 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // ──────────────────────────────────────────────────────────────────────
 
   /**
-   * Inicia el flujo de escalado.
-   * Llamado desde dos caminos:
-   *   A) n8n envía resolved: false  → handleBotReply
-   *   B) Usuario toca el botón      → handleMessage (optionId: 'escalate')
-   *
-   * n8n genera y envía el texto "describe tu problema" por /chat/bot-reply.
+   * Paso 0: n8n detectó resolved:false o usuario tocó el botón.
+   * Pregunta al usuario si desea hablar con un asesor.
    */
   private async startEscalationFlow(session: SessionState) {
     if (session.escalationState === 'done') return;
+    if (session.escalationState !== 'none') return;
 
-    session.escalationState = 'awaiting_reason';
+    session.escalationState = 'pending';
 
-    // Señal al front para que ajuste su estado (deshabilitar chips, etc.)
+    // Señal al front para mostrar el botón / chips de sí/no
     this.server.to(session.chatSessionId).emit('show-escalate-button', {});
 
-    // n8n genera y envía el texto "describe tu problema" por /chat/bot-reply
-    await this.n8nService.notifyEscalation('escalation_start', {
-      chatSessionId: session.chatSessionId,
-      userId: session.userId,
-      conversationId: session.conversationId,
-      context: session.context ?? undefined,
-    });
+    // El gateway envía el mensaje directamente — no necesita pasar por n8n
+    await this.emitBotMessage(
+      session,
+      'No pude resolver tu consulta con certeza. ¿Te gustaría que un asesor te contacte?',
+    );
   }
 
   /**
-   * Recibe el motivo del usuario, persiste en BD, lee los canales de contacto
-   * desde SupportChannels y emite la confirmación directamente al usuario.
+   * Paso 1: usuario confirmó que sí quiere escalar.
+   * Pide el nombre.
+   */
+  private async handleEscalationConfirmed(session: SessionState) {
+    session.escalationState = 'awaiting_nombre';
+    await this.emitBotMessage(session, '¿Cuál es tu nombre completo?');
+  }
+
+  /**
+   * Paso 2: usuario rechazó escalar.
+   * Volver al flujo normal.
+   */
+  private async handleEscalationDeclined(session: SessionState) {
+    session.escalationState = 'none';
+    await this.emitBotMessage(
+      session,
+      'Entendido. Puedes seguir preguntándome lo que necesites. 😊',
+    );
+  }
+
+  /**
+   * Paso 3: recibe nombre → pide correo.
+   */
+  private async handleEscalationNombre(session: SessionState, nombre: string) {
+    session.escalationNombre = nombre.trim();
+    session.escalationState = 'awaiting_correo';
+    await this.emitBotMessage(
+      session,
+      `Gracias, ${session.escalationNombre}. ¿Cuál es tu correo electrónico?`,
+    );
+  }
+
+  /**
+   * Paso 4: recibe correo → pide motivo/descripción.
+   */
+  private async handleEscalationCorreo(session: SessionState, correo: string) {
+    session.escalationCorreo = correo.trim();
+    session.escalationState = 'awaiting_reason';
+    await this.emitBotMessage(
+      session,
+      'Por último, describe brevemente tu consulta o el motivo por el que necesitas hablar con un asesor.',
+    );
+  }
+
+  /**
+   * Paso 5: recibe motivo → persiste en BD y envía confirmación.
    */
   private async handleEscalationReason(session: SessionState, reason: string) {
     session.escalationState = 'done';
@@ -219,23 +266,22 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         reason.trim(),
         session.history,
         session.conversationId,
+        session.escalationNombre ?? undefined,
+        session.escalationCorreo ?? undefined,
       );
 
       session.persisting = true;
       session.conversationId = conversation.codConversation;
 
-      // Unir todos los sockets al room persistido
       for (const socketId of session.sockets) {
         const s = this.server.sockets.sockets.get(socketId);
         if (s) s.join(conversation.codConversation);
       }
 
-      // Señal al front: conversación escalada y guardada en BD
       this.server.to(session.chatSessionId).emit('chat-escalated', {
         conversationId: conversation.codConversation,
       });
 
-      // Leer canales desde BD — filtra por contexto de la sesión
       const ctx = (session.context ?? 'posgrados') as ChannelContext;
       const allChannels =
         await this.supportChannelsService.showSupportChannels();
@@ -256,13 +302,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           `_Menciona tu ${verb} al contactarnos para una atención más rápida._`,
       );
 
-      // Notificar a n8n — disponible para integraciones externas (CRM, email, etc.)
       await this.n8nService.notifyEscalation('escalation_done', {
         chatSessionId: session.chatSessionId,
         userId: session.userId,
         conversationId: conversation.codConversation,
         context: session.context ?? undefined,
         reason: reason.trim(),
+        nombre: session.escalationNombre ?? undefined,
+        correo: session.escalationCorreo ?? undefined,
       });
     } catch (err) {
       console.error(
@@ -369,13 +416,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    // Registrar context en sesión la primera vez que llega
     if (context && !session.context) {
       session.context = context;
     }
 
-    // Ignorar el mensaje interno de selección de contexto:
-    // solo sirve para registrar el context en sesión, no va al historial ni a n8n.
     if (message.startsWith('context_selected:')) return;
 
     const isFirstTurn = !session.firstUserMessageSeen;
@@ -415,19 +459,61 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(chatSessionId).emit('on-message', userPayload);
     }
 
-    // ── Camino B: usuario toca el botón "Hablar con un asesor" ──────────
+    // ── Botón "Hablar con un asesor" (petición directa) ─────────────────
+    // El usuario ya expresó su intención — saltar confirmación e ir directo a nombre
     if (meta?.optionId === 'escalate') {
-      await this.startEscalationFlow(session);
+      if (session.escalationState === 'none') {
+        session.escalationState = 'pending';
+        await this.handleEscalationConfirmed(session);
+      }
       return;
     }
 
-    // ── Flujo de escalado en curso: recoger motivo del usuario ───────────
-    if (session.escalationState === 'awaiting_reason') {
+    // ── Máquina de estados del escalado ──────────────────────────────────
+    const state = session.escalationState;
+
+    // Esperando decisión sí/no
+    if (state === 'pending') {
+      const msg = message.trim().toLowerCase();
+      const confirmed =
+        meta?.optionId === 'escalate_yes' ||
+        ['si', 'sí', 'yes', 'quiero', 'de acuerdo', 'ok', 'claro'].includes(
+          msg,
+        );
+      const declined =
+        meta?.optionId === 'escalate_no' ||
+        ['no', 'no gracias', 'nope', 'cancelar'].includes(msg);
+
+      if (confirmed) {
+        await this.handleEscalationConfirmed(session);
+      } else if (declined) {
+        await this.handleEscalationDeclined(session);
+      } else {
+        // Respuesta ambigua — volver a preguntar
+        await this.emitBotMessage(
+          session,
+          '¿Deseas que te contacte un asesor? Responde **Sí** o **No**.',
+        );
+      }
+      return;
+    }
+
+    if (state === 'awaiting_nombre') {
+      await this.handleEscalationNombre(session, message);
+      return;
+    }
+
+    if (state === 'awaiting_correo') {
+      await this.handleEscalationCorreo(session, message);
+      return;
+    }
+
+    if (state === 'awaiting_reason') {
       await this.handleEscalationReason(session, message);
       return;
     }
 
-    // ── Flujo normal: delegar a n8n ──────────────────────────────────────
+    // ── Flujo normal: delegar a n8n ───────────────────────────────────────
     await this.n8nService.sendMessage({
       chatSessionId,
       userId,
@@ -459,10 +545,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.touchSession(session);
 
-    // Emitir la respuesta del bot al cliente
     await this.emitBotMessage(session, message);
 
-    // ── Camino A: n8n determinó que la consulta NO fue resuelta ──────────
+    // Camino A: n8n no resolvió → iniciar flujo de escalado
     if (!resolved && session.escalationState === 'none') {
       await this.startEscalationFlow(session);
     }

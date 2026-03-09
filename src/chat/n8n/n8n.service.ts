@@ -15,6 +15,8 @@ export type EscalationEvent = 'escalation_start' | 'escalation_done';
 export class N8nService {
   private readonly logger = new Logger(N8nService.name);
 
+  // Un solo webhook maneja mensajes normales Y eventos de escalado.
+  // El Switch Evento en n8n los diferencia por el campo "event".
   private readonly webhookUrl = String(process.env.N8N_WEBHOOK_URL);
 
   // Mensajes normales del usuario → event implícito: 'message'
@@ -29,6 +31,8 @@ export class N8nService {
     await axios.post(this.webhookUrl, { event: 'message', ...payload });
   }
 
+  // Eventos de escalado → escalation_start | escalation_done
+  // Fire-and-forget: si falla se loguea pero el chat no se rompe.
   async notifyEscalation(
     event: EscalationEvent,
     payload: {
@@ -37,6 +41,8 @@ export class N8nService {
       conversationId?: string | null;
       context?: ChatContext;
       reason?: string;
+      nombre?: string;
+      correo?: string;
     },
   ) {
     try {
