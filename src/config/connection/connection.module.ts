@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { error } from 'console';
+import { Admin } from 'src/admin/entities/admin.entity';
 import { Conversation } from 'src/conversation/conversation';
 import { Message } from 'src/message/message';
 import { SupportChannel } from 'src/support-channels/entities/supportChannel';
@@ -26,7 +27,7 @@ import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
             synchronize: true,
             logging: true,
             namingStrategy: new SnakeNamingStrategy(),
-            entities: [Message, Conversation, SupportChannel],
+            entities: [Message, Conversation, SupportChannel, Admin],
             // ssl: false,
           });
 

@@ -3,9 +3,10 @@ import { AdminAuthService } from './admin-auth.service';
 import { AdminAuthController } from './admin-auth.controller';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './jwt/jwt.strategy';
+import { AdminModule } from 'src/admin/admin.module';
 
 @Module({
-  imports: [PassportModule],
+  imports: [PassportModule, AdminModule],
   controllers: [AdminAuthController],
   providers: [AdminAuthService, JwtStrategy],
 })
