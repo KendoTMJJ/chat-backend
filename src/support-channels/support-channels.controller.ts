@@ -14,7 +14,8 @@ import {
 import { JwtAuthGuard } from 'src/admin-auth/jwt/jwt-auth.guard';
 import { AdminGuard } from 'src/admin-auth/jwt/admin.guard';
 import { SupportChannelsService } from './support-channels.service';
-import { SupportChannel } from './entities/supportChannel';
+import { CreateSupportChannelDto } from './dto/create-support-channel.dto';
+import { UpdateSupportChannelDto } from './dto/update-support-channel.dto';
 
 @UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('support-channels')
@@ -29,8 +30,8 @@ export class SupportChannelsController {
   }
 
   @Post('create')
-  public createSupportChannel(@Body() objSupportChannel: SupportChannel): any {
-    return this.supportChannelsService.createSupportChannel(objSupportChannel);
+  public createSupportChannel(@Body() dto: CreateSupportChannelDto): any {
+    return this.supportChannelsService.createSupportChannel(dto);
   }
 
   @Delete('delete/:id')
@@ -42,7 +43,7 @@ export class SupportChannelsController {
   }
 
   @Patch('update')
-  public updateSupportChannel(@Body() objSupportChannel: SupportChannel): any {
-    return this.supportChannelsService.updateSupportChannel(objSupportChannel);
+  public updateSupportChannel(@Body() dto: UpdateSupportChannelDto): any {
+    return this.supportChannelsService.updateSupportChannel(dto);
   }
 }

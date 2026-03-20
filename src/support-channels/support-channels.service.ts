@@ -2,7 +2,9 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { SupportChannel } from './entities/supportChannel';
-import { DataSource } from 'typeorm'; // ← corregido: era 'typeorm/browser'
+import { DataSource } from 'typeorm';
+import { CreateSupportChannelDto } from './dto/create-support-channel.dto';
+import { UpdateSupportChannelDto } from './dto/update-support-channel.dto';
 
 @Injectable()
 export class SupportChannelsService {
@@ -17,7 +19,7 @@ export class SupportChannelsService {
   }
 
   public async createSupportChannel(
-    objSupportChannel: SupportChannel,
+    objSupportChannel: CreateSupportChannelDto,
   ): Promise<SupportChannel> {
     try {
       return await this.SupportChannelRepository.save(objSupportChannel);
@@ -41,7 +43,7 @@ export class SupportChannelsService {
   }
 
   public async updateSupportChannel(
-    objSupportChannel: SupportChannel,
+    objSupportChannel: UpdateSupportChannelDto,
   ): Promise<any> {
     try {
       return await this.SupportChannelRepository.update(
