@@ -9,10 +9,14 @@ import {
   Param,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from 'src/admin-auth/jwt/jwt-auth.guard';
+import { AdminGuard } from 'src/admin-auth/jwt/admin.guard';
 import { SupportChannelsService } from './support-channels.service';
 import { SupportChannel } from './entities/supportChannel';
 
+@UseGuards(JwtAuthGuard, AdminGuard)
 @Controller('support-channels')
 export class SupportChannelsController {
   constructor(

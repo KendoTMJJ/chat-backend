@@ -14,6 +14,12 @@ import { ChatService } from './chat.service';
 import { N8nService } from './n8n/n8n.service';
 import { SupportChannelsService } from '../support-channels/support-channels.service';
 import { ChannelContext } from '../support-channels/entities/supportChannel';
+import {
+  CONTEXT_SELECTED_PREFIX,
+  DEFAULT_WHATSAPP,
+  DEFAULT_EMAIL,
+  WELCOME_BOT_NAME,
+} from './constants/chat.constants';
 
 type ChatContext = 'posgrados' | 'mesa_ayuda';
 
@@ -86,6 +92,35 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private now() {
     return Date.now();
+  }
+
+  private buildWelcomeMessage(context?: ChatContext | null): string {
+    if (context === 'posgrados') {
+      return (
+        '👋 Hola, soy el **Asistente de Posgrados Santo Tomás Tunja**.\n\n' +
+        'Puedo ayudarte con:\n' +
+        '- 🎓 Programas de maestría, especialización y doctorado\n' +
+        '- 📋 Duración, costos, créditos y modalidad\n' +
+        '- 📚 Malla curricular, electivas y opciones de grado\n' +
+        '- 📝 Requisitos e inscripción\n\n' +
+        'Escribe el nombre del programa que te interesa o hazme tu pregunta 😊'
+      );
+    }
+    if (context === 'mesa_ayuda') {
+      return (
+        '👋 Hola, soy el **Asistente de Mesa de Ayuda Santo Tomás Tunja**.\n\n' +
+        'Puedo ayudarte con:\n' +
+        '- 🖥️ Soporte técnico de sistemas y plataformas universitarias\n' +
+        '- 📄 Trámites académicos y administrativos\n' +
+        '- 🔑 Acceso a servicios universitarios\n\n' +
+        'Describe tu problema o consulta y te orientaré 😊'
+      );
+    }
+    return (
+      '👋 Hola, soy el **Asistente Virtual Santo Tomás Tunja**.\n\n' +
+      'Puedo ayudarte con información académica y soporte universitario.\n' +
+      '¿En qué puedo ayudarte hoy? 😊'
+    );
   }
 
   // ──────────────────────────────────────────────────────────────────────
@@ -165,7 +200,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private async emitBotMessage(session: SessionState, message: string) {
     const payload = {
       userId: 'bot',
-      name: 'Asistente Virtual',
+      name: WELCOME_BOT_NAME,
       sender: 'bot' as const,
       message,
       conversationId: session.conversationId ?? null,
@@ -287,8 +322,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         await this.supportChannelsService.showSupportChannels();
       const channel = allChannels.find((c) => c.context === ctx);
 
-      const whatsapp = channel?.whatsapp ?? '+57 300 000 0000';
-      const email = channel?.email ?? 'soporte@usta.edu.co';
+      const whatsapp = channel?.whatsapp ?? DEFAULT_WHATSAPP;
+      const email = channel?.email ?? DEFAULT_EMAIL;
       const label =
         ctx === ChannelContext.MESA_AYUDA ? 'Mesa de Ayuda' : 'Posgrados';
       const verb = ctx === ChannelContext.MESA_AYUDA ? 'solicitud' : 'consulta';
@@ -327,6 +362,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleConnection(socket: Socket) {
     const userId = socket.handshake.auth?.userId;
     const tabId = socket.handshake.auth?.tabId;
+    const authContext = socket.handshake.auth?.context as
+      | ChatContext
+      | undefined;
 
     if (!userId || !tabId) {
       socket.emit('session-error', {
@@ -338,6 +376,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const session = this.getOrCreateSession(tabId, userId);
+
+    if (authContext && !session.context) {
+      session.context = authContext;
+    }
 
     socket.data.userId = userId;
     socket.data.tabId = tabId;
@@ -356,9 +398,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       session.welcomeSent = true;
       socket.emit('on-message', {
         userId: 'bot',
-        name: 'Asistente Virtual',
+        name: WELCOME_BOT_NAME,
         sender: 'bot',
-        message: 'Hola 👋 ¿En qué puedo ayudarte?',
+        message: this.buildWelcomeMessage(session.context),
         conversationId: session.conversationId ?? null,
       });
     }
@@ -420,7 +462,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       session.context = context;
     }
 
-    if (message.startsWith('context_selected:')) return;
+    if (message.startsWith(CONTEXT_SELECTED_PREFIX)) return;
 
     const isFirstTurn = !session.firstUserMessageSeen;
     session.firstUserMessageSeen = true;

@@ -1,13 +1,15 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { sign } from 'jsonwebtoken';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AdminAuthService {
-  login(email: string, password: string) {
-    if (
-      email !== String(process.env.ADMIN_EMAIL) ||
-      password !== String(process.env.ADMIN_PASSWORD)
-    ) {
+  async login(email: string, password: string) {
+    const passwordHash = String(process.env.ADMIN_PASSWORD_HASH);
+    const emailMatch = email === String(process.env.ADMIN_EMAIL);
+    const passwordMatch = await bcrypt.compare(password, passwordHash);
+
+    if (!emailMatch || !passwordMatch) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
