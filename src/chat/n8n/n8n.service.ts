@@ -9,7 +9,10 @@ type N8nMeta = {
   optionId?: string;
 };
 
-export type EscalationEvent = 'escalation_start' | 'escalation_done';
+export type EscalationEvent =
+  | 'escalation_start'
+  | 'escalation_done'
+  | 'escalation_declined';
 
 @Injectable()
 export class N8nService {

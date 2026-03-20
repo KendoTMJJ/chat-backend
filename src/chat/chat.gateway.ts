@@ -259,6 +259,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    */
   private async handleEscalationDeclined(session: SessionState) {
     session.escalationState = 'none';
+    session.escalationNombre = null;
+    session.escalationCorreo = null;
+
+    // Notificar a n8n para que restaure el contexto de la sesión (active_snies)
+    void this.n8nService.notifyEscalation('escalation_declined', {
+      chatSessionId: session.chatSessionId,
+      userId: session.userId,
+      context: session.context ?? undefined,
+    });
+
     await this.emitBotMessage(
       session,
       'Entendido. Puedes seguir preguntándome lo que necesites. 😊',
