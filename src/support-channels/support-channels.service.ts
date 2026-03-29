@@ -31,7 +31,7 @@ export class SupportChannelsService {
     }
   }
 
-  public async deleteRecipie(id: string) {
+  public async deleteChannel(id: string) {
     try {
       return await this.SupportChannelRepository.delete({ id });
     } catch (error) {

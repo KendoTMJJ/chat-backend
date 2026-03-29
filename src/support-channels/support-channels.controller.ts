@@ -39,7 +39,7 @@ export class SupportChannelsController {
     if (!id || id.trim() === '') {
       throw new HttpException('El id no es válido', HttpStatus.CONFLICT);
     }
-    return this.supportChannelsService.deleteRecipie(id);
+    return this.supportChannelsService.deleteChannel(id);
   }
 
   @Patch('update')

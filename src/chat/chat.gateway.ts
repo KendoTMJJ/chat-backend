@@ -240,7 +240,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // El gateway envía el mensaje directamente — no necesita pasar por n8n
     await this.emitBotMessage(
       session,
-      'No pude resolver tu consulta con certeza. ¿Te gustaría que un asesor te contacte?',
+      'No pude resolver tu consulta con certeza. ¿Te gustaría que te compartamos los canales de contacto directo?',
     );
   }
 
@@ -295,7 +295,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     session.escalationState = 'awaiting_reason';
     await this.emitBotMessage(
       session,
-      'Por último, describe brevemente tu consulta o el motivo por el que necesitas hablar con un asesor.',
+      'Por último, describe brevemente tu consulta o el motivo de tu contacto.',
     );
   }
 
@@ -341,7 +341,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.emitBotMessage(
         session,
         `✅ **Tu ${verb} ha sido registrada.**\n\n` +
-          `Un asesor de **${label}** revisará tu caso a la brevedad.\n\n` +
+          `Aquí tienes los canales de atención directa de **${label}**:\n\n` +
           `📱 **WhatsApp:** ${whatsapp}\n` +
           `📧 **Correo:** ${email}\n\n` +
           `_Menciona tu ${verb} al contactarnos para una atención más rápida._`,
@@ -544,7 +544,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         // Respuesta ambigua — volver a preguntar
         await this.emitBotMessage(
           session,
-          '¿Deseas que te contacte un asesor? Responde **Sí** o **No**.',
+          '¿Deseas que te compartamos los canales de contacto directo? Responde **Sí** o **No**.',
         );
       }
       return;
