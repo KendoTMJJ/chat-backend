@@ -302,6 +302,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
     session.escalationNombre = trimmed;
+
+    // Si correo y motivo ya están llenos (edición), volver directo a confirmación
+    if (session.escalationCorreo && session.escalationReason) {
+      session.escalationState = 'awaiting_confirmation';
+      this.server.to(session.chatSessionId).emit('show-confirmation', {
+        nombre: session.escalationNombre,
+        correo: session.escalationCorreo,
+        motivo: session.escalationReason,
+      });
+      return;
+    }
+
     session.escalationState = 'awaiting_correo';
     await this.emitBotMessage(
       session,
@@ -323,6 +335,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
     session.escalationCorreo = trimmed;
+
+    // Si el motivo ya está lleno (edición), volver directo a confirmación
+    if (session.escalationReason) {
+      session.escalationState = 'awaiting_confirmation';
+      this.server.to(session.chatSessionId).emit('show-confirmation', {
+        nombre: session.escalationNombre,
+        correo: session.escalationCorreo,
+        motivo: session.escalationReason,
+      });
+      return;
+    }
+
     session.escalationState = 'awaiting_reason';
     await this.emitBotMessage(
       session,
