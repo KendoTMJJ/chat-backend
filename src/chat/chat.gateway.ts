@@ -240,12 +240,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Señal al front para mostrar el botón / chips de sí/no
     this.server.to(session.chatSessionId).emit('show-escalate-button', {});
-
-    // El gateway envía el mensaje directamente — no necesita pasar por n8n
-    await this.emitBotMessage(
-      session,
-      'No pude resolver tu consulta con certeza. ¿Te gustaría que te compartamos los canales de contacto directo?',
-    );
   }
 
   /**
@@ -254,7 +248,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    */
   private async handleEscalationConfirmed(session: SessionState) {
     session.escalationState = 'awaiting_nombre';
-    await this.emitBotMessage(session, '¿Cuál es tu nombre completo?');
+    await this.emitBotMessage(
+      session,
+      'Claro 😊, con gusto te ayudo. Antes de indicarte los canales de comunicación, ¿me puedes compartir tu **nombre completo**?',
+    );
   }
 
   /**
@@ -297,7 +294,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!nameRegex.test(trimmed) || words.length < 2) {
       await this.emitBotMessage(
         session,
-        'No reconocí un nombre completo 😊 ¿Puedes escribir tu nombre y apellido?',
+        'No reconocí un nombre completo 😊 ¿Puedes escribir tu **nombre y apellido**?',
       );
       return;
     }
@@ -317,7 +314,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     session.escalationState = 'awaiting_correo';
     await this.emitBotMessage(
       session,
-      `Gracias, ${session.escalationNombre}. ¿Cuál es tu correo electrónico?`,
+      `Gracias, ${session.escalationNombre}. ¿Cuál es tu **correo electrónico**?`,
     );
   }
 
