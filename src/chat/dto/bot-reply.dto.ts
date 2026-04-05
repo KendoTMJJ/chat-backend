@@ -1,20 +1,36 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
+  ValidateNested,
 } from 'class-validator';
+
+class ButtonDto {
+  @IsString()
+  @IsNotEmpty()
+  label!: string;
+
+  @IsOptional()
+  @IsString()
+  message?: string;
+
+  @IsOptional()
+  @IsString()
+  url?: string;
+}
 
 export class BotReplyDto {
   @IsString()
   @IsNotEmpty()
-  chatSessionId: string;
+  chatSessionId!: string;
 
   @IsString()
   @IsNotEmpty()
-  message: string;
+  message!: string;
 
   @IsBoolean()
   @Transform(({ value }) => {
@@ -22,9 +38,15 @@ export class BotReplyDto {
     if (value === 'false') return false;
     return value;
   })
-  resolved: boolean;
+  resolved!: boolean;
 
   @IsOptional()
   @IsIn(['posgrados', 'mesa_ayuda'])
   context?: 'posgrados' | 'mesa_ayuda';
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ButtonDto)
+  buttons?: ButtonDto[];
 }

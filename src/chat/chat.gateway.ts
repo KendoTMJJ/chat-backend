@@ -80,7 +80,7 @@ type SessionState = {
 @WebSocketGateway({ cors: { origin: '*' } })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   constructor(
     private readonly chatService: ChatService,
@@ -95,6 +95,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private now() {
     return Date.now();
+  }
+
+  private buildWelcomeButtons(
+    context?: ChatContext | null,
+  ): Array<{ label: string; message?: string; url?: string }> {
+    if (context === 'posgrados') {
+      return [
+        {
+          label: '🎓 Ver programas',
+          message: '¿Qué programas de posgrado ofrecen?',
+        },
+      ];
+    }
+    if (context === 'mesa_ayuda') {
+      return [];
+    }
+    return [];
   }
 
   private buildWelcomeMessage(context?: ChatContext | null): string {
@@ -201,13 +218,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return session;
   }
 
-  private async emitBotMessage(session: SessionState, message: string) {
+  private async emitBotMessage(
+    session: SessionState,
+    message: string,
+    buttons?: Array<{ label: string; message?: string; url?: string }>,
+  ) {
     const payload = {
       userId: 'bot',
       name: WELCOME_BOT_NAME,
       sender: 'bot' as const,
       message,
       conversationId: session.conversationId ?? null,
+      ...(buttons?.length ? { buttons } : {}),
     };
 
     if (session.persisting && session.conversationId) {
@@ -432,7 +454,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } catch (err) {
       console.error(
         '[completeEscalation] Error al escalar:',
-        err?.message ?? err,
+        err instanceof Error ? err.message : err,
       );
       session.escalationState = 'none';
     }
@@ -502,12 +524,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (!session.welcomeSent) {
       session.welcomeSent = true;
+      const welcomeButtons = this.buildWelcomeButtons(session.context);
       socket.emit('on-message', {
         userId: 'bot',
         name: WELCOME_BOT_NAME,
         sender: 'bot',
         message: this.buildWelcomeMessage(session.context),
         conversationId: session.conversationId ?? null,
+        ...(welcomeButtons.length ? { buttons: welcomeButtons } : {}),
       });
     }
   }
@@ -686,8 +710,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     message: string;
     resolved: boolean;
     context?: ChatContext;
+    buttons?: Array<{ label: string; message?: string; url?: string }>;
   }) {
-    const { chatSessionId, message, resolved } = data;
+    const { chatSessionId, message, resolved, buttons } = data;
 
     const sockets = await this.server.in(chatSessionId).fetchSockets();
     if (!sockets.length) return;
@@ -698,7 +723,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.touchSession(session);
 
-    await this.emitBotMessage(session, message);
+    await this.emitBotMessage(session, message, buttons);
 
     // Camino A: n8n no resolvió → iniciar flujo de escalado
     if (!resolved && session.escalationState === 'none') {
