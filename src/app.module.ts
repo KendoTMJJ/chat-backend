@@ -5,6 +5,8 @@ import { ConnectionModule } from './config/connection/connection.module';
 import { AdminAuthModule } from './admin-auth/admin-auth.module';
 import { AdminModule } from './admin/admin.module';
 import { SupportChannelsModule } from './support-channels/support-channels.module';
+import { HelpdeskModule } from './helpdesk/helpdesk.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 
 @Module({
   imports: [
@@ -14,6 +16,8 @@ import { SupportChannelsModule } from './support-channels/support-channels.modul
     AdminAuthModule,
     AdminModule,
     SupportChannelsModule,
+    HelpdeskModule,
+    KnowledgeModule,
   ],
 })
 export class AppModule {}
