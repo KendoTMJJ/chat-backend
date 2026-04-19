@@ -97,9 +97,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return Date.now();
   }
 
-  private buildWelcomeButtons(
-    context?: ChatContext | null,
-  ): Array<{ label: string; message?: string; url?: string }> {
+  private buildWelcomeButtons(context?: ChatContext | null): Array<{
+    label: string;
+    message?: string;
+    url?: string;
+    optionId?: string;
+  }> {
     if (context === 'posgrados') {
       return [
         {
@@ -109,7 +112,38 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       ];
     }
     if (context === 'mesa_ayuda') {
-      return [];
+      return [
+        {
+          label: '💳 Pagos',
+          message: '¿Cómo realizo un pago?',
+          optionId: 'pagos:menu',
+        },
+        {
+          label: '📧 Correo institucional',
+          message: '¿Cómo configuro mi correo?',
+          optionId: 'correo_institucional:menu',
+        },
+        {
+          label: '📄 Certificados',
+          message: '¿Cómo solicito un certificado?',
+          optionId: 'certificados:menu',
+        },
+        {
+          label: '📋 Paz y salvos',
+          message: '¿Cómo obtengo un paz y salvo?',
+          optionId: 'paz_y_salvos:menu',
+        },
+        {
+          label: '🎓 Cursos de profundización',
+          message: '¿Cómo me inscribo a un curso?',
+          optionId: 'cursos_profundizacion:main',
+        },
+        {
+          label: '🔄 Cambio de documento',
+          message: '¿Cómo cambio mi documento o contraseña SAC?',
+          optionId: 'cambio_documento:main',
+        },
+      ];
     }
     return [];
   }
