@@ -1,5 +1,5 @@
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
-import { IsString, MinLength } from 'class-validator';
+import { IsEmail, IsString, MinLength } from 'class-validator';
 import { AdminAuthService } from './admin-auth.service';
 
 class LoginDto {
@@ -7,8 +7,13 @@ class LoginDto {
   @IsString() password: string;
 }
 
+class ForgotPasswordDto {
+  @IsEmail({}, { message: 'Ingresa un correo electrónico válido' })
+  email: string;
+}
+
 class ResetPasswordDto {
-  @IsString() resetToken: string;
+  @IsString() token: string;
   @IsString() @MinLength(8) newPassword: string;
 }
 
@@ -22,10 +27,20 @@ export class AdminAuthController {
     return this.adminAuthService.login(body.email, body.password);
   }
 
+  @Post('forgot-password')
+  @HttpCode(200)
+  async forgotPassword(@Body() body: ForgotPasswordDto) {
+    await this.adminAuthService.forgotPassword(body.email);
+    return {
+      message:
+        'Si el correo está registrado, recibirás instrucciones en tu bandeja de entrada.',
+    };
+  }
+
   @Post('reset-password')
   @HttpCode(200)
   async resetPassword(@Body() body: ResetPasswordDto) {
-    await this.adminAuthService.resetPassword(body.resetToken, body.newPassword);
+    await this.adminAuthService.resetPassword(body.token, body.newPassword);
     return { message: 'Contraseña restablecida correctamente' };
   }
 }

@@ -23,6 +23,12 @@ export class Admin {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ type: 'varchar', nullable: true })
+  resetToken: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  resetTokenExpires: Date | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

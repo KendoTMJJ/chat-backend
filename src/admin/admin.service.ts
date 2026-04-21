@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { Admin } from './entities/admin.entity';
 import { ChangePasswordDto, UpdateProfileDto } from './dto/update-admin.dto';
 
@@ -86,6 +87,34 @@ export class AdminService implements OnApplicationBootstrap {
     const admin = await this.adminRepo.findOne({ where: { isActive: true } });
     if (!admin) throw new NotFoundException('No existe ningún admin activo');
     admin.password = await bcrypt.hash(newPassword, 10);
+    await this.adminRepo.save(admin);
+  }
+
+  async createResetToken(email: string): Promise<string | null> {
+    const admin = await this.adminRepo.findOne({ where: { email, isActive: true } });
+    if (!admin) return null;
+
+    const token = crypto.randomBytes(32).toString('hex');
+    admin.resetToken = token;
+    admin.resetTokenExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
+    await this.adminRepo.save(admin);
+    return token;
+  }
+
+  async resetPasswordByToken(token: string, newPassword: string): Promise<void> {
+    const admin = await this.adminRepo.findOne({ where: { resetToken: token } });
+
+    if (!admin || !admin.resetTokenExpires || admin.resetTokenExpires < new Date()) {
+      throw new UnauthorizedException('El enlace de recuperación no es válido o ya expiró');
+    }
+
+    if (newPassword.length < 8) {
+      throw new BadRequestException('La contraseña debe tener al menos 8 caracteres');
+    }
+
+    admin.password = await bcrypt.hash(newPassword, 10);
+    admin.resetToken = null;
+    admin.resetTokenExpires = null;
     await this.adminRepo.save(admin);
   }
 }
