@@ -9,10 +9,10 @@ export class AdminAuthService {
 
   async login(email: string, password: string) {
     const admin = await this.adminService.findByEmail(email);
-    if (!admin) throw new UnauthorizedException('Invalid credentials');
+    if (!admin) throw new UnauthorizedException('Credenciales inválidas');
 
-    const passwordMatch = await bcrypt.compare(password, admin.password);
-    if (!passwordMatch) throw new UnauthorizedException('Invalid credentials');
+    const match = await bcrypt.compare(password, admin.password);
+    if (!match) throw new UnauthorizedException('Credenciales inválidas');
 
     const token = sign(
       { sub: admin.id, email: admin.email, name: admin.name },
@@ -21,5 +21,13 @@ export class AdminAuthService {
     );
 
     return { access_token: token };
+  }
+
+  async resetPassword(resetToken: string, newPassword: string) {
+    const expected = process.env.ADMIN_RESET_TOKEN;
+    if (!expected || resetToken !== expected) {
+      throw new UnauthorizedException('Token de recuperación inválido');
+    }
+    await this.adminService.resetPassword(newPassword);
   }
 }

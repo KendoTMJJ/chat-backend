@@ -1,16 +1,21 @@
 import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
 
-export class UpdateAdminDto {
+export class UpdateProfileDto {
   @IsEmail()
   @IsOptional()
   email?: string;
 
   @IsString()
-  @MinLength(6)
-  @IsOptional()
-  password?: string;
-
-  @IsString()
   @IsOptional()
   name?: string;
+}
+
+export class ChangePasswordDto {
+  @IsString()
+  @IsOptional()
+  currentPassword?: string;
+
+  @IsString()
+  @MinLength(8)
+  newPassword: string;
 }
