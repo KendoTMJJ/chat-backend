@@ -1,5 +1,6 @@
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 import { IsEmail, IsString, MinLength } from 'class-validator';
+import { Throttle } from '@nestjs/throttler';
 import { AdminAuthService } from './admin-auth.service';
 
 class LoginDto {
@@ -23,12 +24,14 @@ export class AdminAuthController {
 
   @Post('login')
   @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   login(@Body() body: LoginDto) {
     return this.adminAuthService.login(body.email, body.password);
   }
 
   @Post('forgot-password')
   @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 3 } })
   async forgotPassword(@Body() body: ForgotPasswordDto) {
     await this.adminAuthService.forgotPassword(body.email);
     return {
@@ -39,6 +42,7 @@ export class AdminAuthController {
 
   @Post('reset-password')
   @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   async resetPassword(@Body() body: ResetPasswordDto) {
     await this.adminAuthService.resetPassword(body.token, body.newPassword);
     return { message: 'Contraseña restablecida correctamente' };
