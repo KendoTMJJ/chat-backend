@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { sign } from 'jsonwebtoken';
 import * as bcrypt from 'bcrypt';
 import * as nodemailer from 'nodemailer';
@@ -26,7 +26,7 @@ export class AdminAuthService {
 
   async forgotPassword(email: string): Promise<void> {
     const token = await this.adminService.createResetToken(email);
-    if (!token) return; // no revelar si el email existe o no
+    if (!token) throw new NotFoundException('Este correo no está registrado en el sistema');
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const resetLink = `${frontendUrl}/admin/reset-password?token=${token}`;
