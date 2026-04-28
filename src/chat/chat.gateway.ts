@@ -16,8 +16,6 @@ import { SupportChannelsService } from '../support-channels/support-channels.ser
 import { ChannelContext } from '../support-channels/entities/supportChannel';
 import {
   CONTEXT_SELECTED_PREFIX,
-  DEFAULT_WHATSAPP,
-  DEFAULT_EMAIL,
   WELCOME_BOT_NAME,
 } from './constants/chat.constants';
 
@@ -470,20 +468,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         intent,
       );
 
-      const whatsapp = channel?.whatsapp ?? DEFAULT_WHATSAPP;
-      const email = channel?.email ?? DEFAULT_EMAIL;
       const label =
         ctx === ChannelContext.MESA_AYUDA ? 'Mesa de Ayuda' : 'Posgrados';
       const verb = ctx === ChannelContext.MESA_AYUDA ? 'solicitud' : 'consulta';
 
-      await this.emitBotMessage(
-        session,
-        `✅ **Tu ${verb} ha sido registrada.**\n\n` +
-          `Aquí tienes los canales de atención directa de **${label}**:\n\n` +
-          `📱 **WhatsApp:** ${whatsapp}\n` +
-          `📧 **Correo:** ${email}\n\n` +
-          `_Menciona tu ${verb} al contactarnos para una atención más rápida._`,
-      );
+      if (channel) {
+        await this.emitBotMessage(
+          session,
+          `✅ **Tu ${verb} ha sido registrada.**\n\n` +
+            `Aquí tienes los canales de atención directa de **${label}**:\n\n` +
+            `📱 **WhatsApp:** ${channel.whatsapp}\n` +
+            `📧 **Correo:** ${channel.email}\n\n` +
+            `_Menciona tu ${verb} al contactarnos para una atención más rápida._`,
+        );
+      } else {
+        await this.emitBotMessage(
+          session,
+          `✅ **Tu ${verb} ha sido registrada.**\n\n` +
+            `Un agente de **${label}** se pondrá en contacto contigo a la brevedad.`,
+        );
+      }
 
       await this.n8nService.notifyEscalation('escalation_done', {
         chatSessionId: session.chatSessionId,
@@ -493,8 +497,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         reason: session.escalationReason!,
         nombre: session.escalationNombre ?? undefined,
         correo: session.escalationCorreo ?? undefined,
-        channelWhatsapp: whatsapp,
-        channelEmail: email,
+        channelWhatsapp: channel?.whatsapp,
+        channelEmail: channel?.email,
       });
     } catch (err) {
       console.error(
