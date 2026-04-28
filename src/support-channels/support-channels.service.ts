@@ -18,6 +18,29 @@ export class SupportChannelsService {
     return await this.SupportChannelRepository.find();
   }
 
+  /**
+   * Busca el canal más específico disponible para un contexto e intent.
+   * Prioridad: (context + intent) → (context + intent=null) → null
+   */
+  public async findByContextAndIntent(
+    context: string,
+    intent?: string | null,
+  ): Promise<SupportChannel | null> {
+    // 1. Canal específico del intent
+    if (intent) {
+      const specific = await this.SupportChannelRepository.findOne({
+        where: { context: context as any, intent },
+      });
+      if (specific) return specific;
+    }
+
+    // 2. Canal genérico del contexto (intent = null)
+    const generic = await this.SupportChannelRepository.findOne({
+      where: { context: context as any, intent: null as any },
+    });
+    return generic ?? null;
+  }
+
   public async createSupportChannel(
     objSupportChannel: CreateSupportChannelDto,
   ): Promise<SupportChannel> {

@@ -45,6 +45,10 @@ export class BotReplyDto {
   context?: 'posgrados' | 'mesa_ayuda';
 
   @IsOptional()
+  @IsString()
+  intent?: string;
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ButtonDto)

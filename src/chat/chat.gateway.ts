@@ -75,6 +75,9 @@ type SessionState = {
   escalationNombre: string | null;
   escalationCorreo: string | null;
   escalationReason: string | null;
+
+  // Intent activo del helpdesk — se actualiza con cada bot-reply de mesa_ayuda
+  helpdeskIntent: string | null;
 };
 
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -246,6 +249,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       escalationNombre: null,
       escalationCorreo: null,
       escalationReason: null,
+      helpdeskIntent: null,
     };
 
     this.sessions.set(tabId, session);
@@ -457,9 +461,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       const ctx = (session.context ?? 'posgrados') as ChannelContext;
-      const allChannels =
-        await this.supportChannelsService.showSupportChannels();
-      const channel = allChannels.find((c) => c.context === ctx);
+      const intent =
+        ctx === ChannelContext.MESA_AYUDA ? session.helpdeskIntent : null;
+
+      const channel = await this.supportChannelsService.findByContextAndIntent(
+        ctx,
+        intent,
+      );
 
       const whatsapp = channel?.whatsapp ?? DEFAULT_WHATSAPP;
       const email = channel?.email ?? DEFAULT_EMAIL;
@@ -744,9 +752,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     message: string;
     resolved: boolean;
     context?: ChatContext;
+    intent?: string;
     buttons?: Array<{ label: string; message?: string; url?: string }>;
   }) {
-    const { chatSessionId, message, resolved, buttons } = data;
+    const { chatSessionId, message, resolved, intent, buttons } = data;
 
     const sockets = await this.server.in(chatSessionId).fetchSockets();
     if (!sockets.length) return;
@@ -756,6 +765,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!session || session.expired) return;
 
     this.touchSession(session);
+
+    // Guardar el intent activo para usarlo en la escalación
+    if (intent) session.helpdeskIntent = intent;
 
     await this.emitBotMessage(session, message, buttons);
 
