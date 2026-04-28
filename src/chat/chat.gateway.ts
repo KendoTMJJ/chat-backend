@@ -446,6 +446,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         session.conversationId,
         session.escalationNombre ?? undefined,
         session.escalationCorreo ?? undefined,
+        session.context ?? undefined,
       );
 
       session.persisting = true;
@@ -492,6 +493,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         reason: session.escalationReason!,
         nombre: session.escalationNombre ?? undefined,
         correo: session.escalationCorreo ?? undefined,
+        channelWhatsapp: whatsapp,
+        channelEmail: email,
       });
     } catch (err) {
       console.error(
@@ -635,6 +638,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     if (message.startsWith(CONTEXT_SELECTED_PREFIX)) return;
+
+    if (message === '__show_menu__') {
+      await this.emitBotMessage(
+        session,
+        this.buildWelcomeMessage(session.context),
+        this.buildWelcomeButtons(session.context),
+      );
+      return;
+    }
 
     const isFirstTurn = !session.firstUserMessageSeen;
     session.firstUserMessageSeen = true;

@@ -13,6 +13,7 @@ export interface ConversationSummary {
   title: string | null;
   nombre: string | null;
   correo: string | null;
+  context: string | null;
   startedAt: Date;
   updatedAt: Date;
   lastMessage: string;
@@ -83,6 +84,7 @@ export class ChatService {
     existingConversationId?: string | null,
     nombre?: string,
     correo?: string,
+    context?: string,
   ): Promise<Conversation> {
     let conversation: Conversation;
 
@@ -108,6 +110,7 @@ export class ChatService {
       title,
       ...(nombre !== undefined && { nombre }),
       ...(correo !== undefined && { correo }),
+      ...(context !== undefined && { context }),
       status: ConversationStatus.ESCALATED,
       lastActivityAt: new Date(),
     });
@@ -211,6 +214,7 @@ export class ChatService {
           title: conversation.title ?? null,
           nombre: conversation.nombre ?? null,
           correo: conversation.correo ?? null,
+          context: conversation.context ?? null,
           startedAt: conversation.startedAt,
           updatedAt: conversation.lastActivityAt,
           lastMessage: lastMessage?.message || '',

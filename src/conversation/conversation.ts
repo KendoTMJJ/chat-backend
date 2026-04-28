@@ -32,6 +32,9 @@ export class Conversation {
   @Column({ type: 'varchar', nullable: true })
   title: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  context: string | null;
+
   @Column({
     type: 'enum',
     enum: ConversationStatus,

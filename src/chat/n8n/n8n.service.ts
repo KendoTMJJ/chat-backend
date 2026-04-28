@@ -46,6 +46,8 @@ export class N8nService {
       reason?: string;
       nombre?: string;
       correo?: string;
+      channelWhatsapp?: string;
+      channelEmail?: string;
     },
   ) {
     try {
