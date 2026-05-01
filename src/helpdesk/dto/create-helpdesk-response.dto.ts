@@ -5,15 +5,11 @@ export class CreateHelpdeskCategoryDto {
   @IsNotEmpty()
   intent!: string;
 
-  @IsString()
-  @IsNotEmpty()
-  label!: string;
-
   @IsOptional()
   @IsString()
   description?: string | null;
 
   @IsOptional()
   @IsString()
-  pdf_url?: string;
+  pdf_url?: string | null;
 }
