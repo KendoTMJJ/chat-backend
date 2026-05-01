@@ -60,6 +60,16 @@ export class HelpdeskProxyService {
     }
   }
 
+  async listPublic(): Promise<Array<{ intent: string; display_label: string; description: string | null; pdf_url: string | null }>> {
+    try {
+      const res = await fetch(`${this.baseUrl}/helpdesk/categories`);
+      if (!res.ok) return [];
+      return res.json();
+    } catch {
+      return [];
+    }
+  }
+
   list(intent?: string) {
     const params: Record<string, string> = {};
     if (intent) params['intent'] = intent;

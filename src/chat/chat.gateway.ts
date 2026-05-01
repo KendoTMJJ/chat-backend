@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto';
 import { ChatService } from './chat.service';
 import { N8nService } from './n8n/n8n.service';
 import { SupportChannelsService } from '../support-channels/support-channels.service';
+import { HelpdeskProxyService } from '../helpdesk/helpdesk-proxy.service';
 import { ChannelContext } from '../support-channels/entities/supportChannel';
 import {
   CONTEXT_SELECTED_PREFIX,
@@ -87,6 +88,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly chatService: ChatService,
     private readonly n8nService: N8nService,
     private readonly supportChannelsService: SupportChannelsService,
+    private readonly helpdeskProxy: HelpdeskProxyService,
   ) {}
 
   private sessions = new Map<string, SessionState>();
@@ -98,12 +100,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return Date.now();
   }
 
-  private buildWelcomeButtons(context?: ChatContext | null): Array<{
+  private async buildWelcomeButtons(context?: ChatContext | null): Promise<Array<{
     label: string;
     message?: string;
     url?: string;
     optionId?: string;
-  }> {
+  }>> {
     if (context === 'posgrados') {
       return [
         {
@@ -113,38 +115,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       ];
     }
     if (context === 'mesa_ayuda') {
-      return [
-        {
-          label: '💳 Pagos',
-          message: '¿Cómo realizo un pago?',
-          optionId: 'pagos:menu',
-        },
-        {
-          label: '📧 Correo institucional',
-          message: '¿Cómo configuro mi correo?',
-          optionId: 'correo_institucional:menu',
-        },
-        {
-          label: '📄 Certificados',
-          message: '¿Cómo solicito un certificado?',
-          optionId: 'certificados:menu',
-        },
-        {
-          label: '📋 Paz y salvos',
-          message: '¿Cómo obtengo un paz y salvo?',
-          optionId: 'paz_y_salvos:menu',
-        },
-        {
-          label: '🎓 Cursos de profundización',
-          message: '¿Cómo me inscribo a un curso?',
-          optionId: 'cursos_profundizacion:main',
-        },
-        {
-          label: '🔄 Cambio de documento',
-          message: '¿Cómo cambio mi documento o contraseña SAC?',
-          optionId: 'cambio_documento:main',
-        },
-      ];
+      const cats = await this.helpdeskProxy.listPublic();
+      return cats.map((cat) => ({
+        label: cat.display_label,
+        message: cat.display_label,
+        optionId: `${cat.intent}:menu`,
+      }));
     }
     return [];
   }
@@ -573,7 +549,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (!session.welcomeSent) {
       session.welcomeSent = true;
-      const welcomeButtons = this.buildWelcomeButtons(session.context);
+      const welcomeButtons = await this.buildWelcomeButtons(session.context);
       socket.emit('on-message', {
         userId: 'bot',
         name: WELCOME_BOT_NAME,
@@ -647,7 +623,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.emitBotMessage(
         session,
         this.buildWelcomeMessage(session.context),
-        this.buildWelcomeButtons(session.context),
+        await this.buildWelcomeButtons(session.context),
       );
       return;
     }
