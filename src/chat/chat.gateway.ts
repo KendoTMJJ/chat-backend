@@ -449,14 +449,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const verb = ctx === ChannelContext.MESA_AYUDA ? 'solicitud' : 'consulta';
 
       if (channel) {
-        const waNumber = channel.whatsapp.replace(/\D/g, '');
         await this.emitBotMessage(
           session,
-          `✅ **Tu ${verb} ha sido registrada.**\n\nUn agente de **${label}** te atenderá pronto. También puedes contactarnos directamente:`,
-          [
-            { label: '📱 WhatsApp', url: `https://wa.me/${waNumber}` },
-            { label: '📧 Correo', url: `mailto:${channel.email}` },
-          ],
+          `✅ **Tu ${verb} ha sido registrada.**\n\nUn agente de **${label}** te atenderá pronto.\n\n📱 **WhatsApp:** ${channel.whatsapp}\n📧 **Correo:** ${channel.email}`,
         );
       } else {
         await this.emitBotMessage(
