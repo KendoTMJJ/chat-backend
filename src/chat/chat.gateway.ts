@@ -12,17 +12,21 @@ import { Server, Socket } from 'socket.io';
 import { randomUUID } from 'crypto';
 import { ChatService } from './chat.service';
 import { N8nService } from './n8n/n8n.service';
+import { SupportChannelsService } from '../support-channels/support-channels.service';
+import { HelpdeskProxyService } from '../helpdesk/helpdesk-proxy.service';
+import { ChannelContext } from '../support-channels/entities/supportChannel';
+import {
+  CONTEXT_SELECTED_PREFIX,
+  WELCOME_BOT_NAME,
+} from './constants/chat.constants';
 
-// Canales de contacto entregados al escalar
-const ESCALATION_CHANNELS = {
-  whatsapp: process.env.ESCALATION_WHATSAPP ?? '+57 300 000 0000',
-  email: process.env.ESCALATION_EMAIL ?? 'posgrados@usta.edu.co',
-};
+type ChatContext = 'posgrados' | 'mesa_ayuda';
 
 type IncomingClientMessage =
   | string
   | {
       message: string;
+      context?: ChatContext;
       meta?: {
         source?: 'text' | 'quick_reply';
         optionId?: string;
@@ -32,11 +36,22 @@ type IncomingClientMessage =
 /**
  * Estados del flujo de escalado en una sesión:
  *
- * 'none'            → flujo normal, sin escalado en curso
- * 'awaiting_reason' → el gateway preguntó el motivo, esperando respuesta del usuario
- * 'done'            → ya se escaló, no volver a escalar en esta sesión
+ * 'none'             → flujo normal, sin escalado en curso
+ * 'pending'          → se emitió show-escalate-button, esperando decisión del usuario
+ * 'awaiting_nombre'  → usuario confirmó escalar, esperando que escriba su nombre
+ * 'awaiting_correo'  → nombre recibido, esperando correo
+ * 'awaiting_reason'        → nombre y correo recibidos, esperando motivo/descripción
+ * 'awaiting_confirmation' → todos los datos recolectados, esperando confirmación del usuario
+ * 'done'                  → ya se escaló, no volver a escalar en esta sesión
  */
-type EscalationState = 'none' | 'awaiting_reason' | 'done';
+type EscalationState =
+  | 'none'
+  | 'pending'
+  | 'awaiting_nombre'
+  | 'awaiting_correo'
+  | 'awaiting_reason'
+  | 'awaiting_confirmation'
+  | 'done';
 
 type SessionState = {
   firstUserMessageSeen: boolean;
@@ -44,26 +59,36 @@ type SessionState = {
   userId: string;
   chatSessionId: string;
   lastSeenAt: number;
-  sockets: Set<string>;
   welcomeSent: boolean;
+  sockets: Set<string>;
   expired: boolean;
   persisting: boolean;
   conversationId: string | null;
   history: Array<{ userId: string; sender: 'user' | 'bot'; message: string }>;
   idleTimer?: NodeJS.Timeout;
 
-  // ── Escalado ─────────────────────────────────────────────────────────
+  context: ChatContext | null;
+
+  // ── Escalado ──────────────────────────────────────────────────────────
   escalationState: EscalationState;
+  escalationNombre: string | null;
+  escalationCorreo: string | null;
+  escalationReason: string | null;
+
+  // Intent activo del helpdesk — se actualiza con cada bot-reply de mesa_ayuda
+  helpdeskIntent: string | null;
 };
 
 @WebSocketGateway({ cors: { origin: '*' } })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   constructor(
     private readonly chatService: ChatService,
     private readonly n8nService: N8nService,
+    private readonly supportChannelsService: SupportChannelsService,
+    private readonly helpdeskProxy: HelpdeskProxyService,
   ) {}
 
   private sessions = new Map<string, SessionState>();
@@ -73,6 +98,60 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private now() {
     return Date.now();
+  }
+
+  private async buildWelcomeButtons(context?: ChatContext | null): Promise<Array<{
+    label: string;
+    message?: string;
+    url?: string;
+    optionId?: string;
+  }>> {
+    if (context === 'posgrados') {
+      return [
+        {
+          label: '🎓 Ver programas',
+          message: '¿Qué programas de posgrado ofrecen?',
+        },
+      ];
+    }
+    if (context === 'mesa_ayuda') {
+      const cats = await this.helpdeskProxy.listPublic();
+      return cats.map((cat) => ({
+        label: cat.display_label,
+        message: cat.display_label,
+        optionId: `${cat.intent}:menu`,
+      }));
+    }
+    return [];
+  }
+
+  private buildWelcomeMessage(context?: ChatContext | null): string {
+    if (context === 'posgrados') {
+      return (
+        '👋 Hola, soy el **Asistente de Posgrados Santo Tomás Tunja**.\n\n' +
+        'Puedo ayudarte con:\n' +
+        '- 🎓 Programas de maestría, especialización y doctorado\n' +
+        '- 📋 Duración, costos, créditos y modalidad\n' +
+        '- 📚 Malla curricular, electivas y opciones de grado\n' +
+        '- 📝 Requisitos e inscripción\n\n' +
+        'Escribe el nombre del programa que te interesa o hazme tu pregunta 😊'
+      );
+    }
+    if (context === 'mesa_ayuda') {
+      return (
+        '👋 Hola, soy el **Asistente de Mesa de Ayuda Santo Tomás Tunja**.\n\n' +
+        'Puedo ayudarte con:\n' +
+        '- 🖥️ Soporte técnico de sistemas y plataformas universitarias\n' +
+        '- 📄 Trámites académicos y administrativos\n' +
+        '- 🔑 Acceso a servicios universitarios\n\n' +
+        'Describe tu problema o consulta y te orientaré 😊'
+      );
+    }
+    return (
+      '👋 Hola, soy el **Asistente Virtual Santo Tomás Tunja**.\n\n' +
+      'Puedo ayudarte con información académica y soporte universitario.\n' +
+      '¿En qué puedo ayudarte hoy? 😊'
+    );
   }
 
   // ──────────────────────────────────────────────────────────────────────
@@ -102,10 +181,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private normalizeIncoming(body: IncomingClientMessage) {
     if (typeof body === 'string') {
-      return { message: body, meta: { source: 'text' as const } };
+      return {
+        message: body,
+        context: null as ChatContext | null,
+        meta: { source: 'text' as const },
+      };
     }
     return {
       message: body?.message ?? '',
+      context: body?.context ?? null,
       meta: body?.meta ?? { source: 'text' as const },
     };
   }
@@ -129,29 +213,35 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       chatSessionId: randomUUID(),
       lastSeenAt: this.now(),
       sockets: new Set(),
-      welcomeSent: false,
       expired: false,
+      welcomeSent: false,
       persisting: false,
       conversationId: null,
       history: [],
+      context: null,
       escalationState: 'none',
+      escalationNombre: null,
+      escalationCorreo: null,
+      escalationReason: null,
+      helpdeskIntent: null,
     };
 
     this.sessions.set(tabId, session);
     return session;
   }
 
-  /**
-   * Emite un mensaje del bot al room de la sesión y lo registra en el
-   * historial efímero (o en BD si la sesión ya persiste).
-   */
-  private async emitBotMessage(session: SessionState, message: string) {
+  private async emitBotMessage(
+    session: SessionState,
+    message: string,
+    buttons?: Array<{ label: string; message?: string; url?: string }>,
+  ) {
     const payload = {
       userId: 'bot',
-      name: 'Asistente Virtual',
+      name: WELCOME_BOT_NAME,
       sender: 'bot' as const,
       message,
       conversationId: session.conversationId ?? null,
+      ...(buttons?.length ? { buttons } : {}),
     };
 
     if (session.persisting && session.conversationId) {
@@ -168,85 +258,248 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  /**
-   * Emite la señal para que el front muestre el botón de escalado.
-   * El front decide cómo renderizarlo; el back solo envía la señal.
-   *
-   * Evento: 'show-escalate-button'
-   * Payload: { message: string }  ← texto de acompañamiento
-   */
-  private emitEscalatePrompt(session: SessionState, message: string) {
-    this.server.to(session.chatSessionId).emit('show-escalate-button', {
-      message,
-    });
-  }
-
   // ──────────────────────────────────────────────────────────────────────
   // Flujo de escalado
   // ──────────────────────────────────────────────────────────────────────
 
   /**
-   * Inicia el flujo de escalado: pide al usuario que describa su problema.
-   * Llamado desde dos caminos:
-   *   A) n8n envía resolved: false  → handleBotReply
-   *   B) Usuario toca el botón      → handleMessage (optionId: 'escalate')
+   * Paso 0: n8n detectó resolved:false o usuario tocó el botón.
+   * Pregunta al usuario si desea hablar con un asesor.
    */
   private async startEscalationFlow(session: SessionState) {
     if (session.escalationState === 'done') return;
+    if (session.escalationState !== 'none') return;
 
-    session.escalationState = 'awaiting_reason';
+    session.escalationState = 'pending';
 
+    // Señal al front para mostrar el botón / chips de sí/no
+    this.server.to(session.chatSessionId).emit('show-escalate-button', {});
+  }
+
+  /**
+   * Paso 1: usuario confirmó que sí quiere escalar.
+   * Pide el nombre.
+   */
+  private async handleEscalationConfirmed(session: SessionState) {
+    session.escalationState = 'awaiting_nombre';
     await this.emitBotMessage(
       session,
-      '📝 Para que un asesor pueda revisar tu caso, por favor **describe brevemente tu consulta o problema**:',
+      'Claro 😊, con gusto te ayudo. Antes de indicarte los canales de comunicación, ¿me puedes compartir tu **nombre completo**?',
     );
   }
 
   /**
-   * Recibe el motivo escrito por el usuario, escala en BD y confirma
-   * con los canales de contacto.
+   * Paso 2: usuario rechazó escalar.
+   * Volver al flujo normal.
+   */
+  private async handleEscalationDeclined(session: SessionState) {
+    const nombreSnapshot = session.escalationNombre;
+    const correoSnapshot = session.escalationCorreo;
+    const reasonSnapshot = session.escalationReason;
+
+    session.escalationState = 'none';
+    session.escalationNombre = null;
+    session.escalationCorreo = null;
+    session.escalationReason = null;
+
+    // Notificar a n8n para que restaure el contexto de la sesión (active_snies)
+    void this.n8nService.notifyEscalation('escalation_declined', {
+      chatSessionId: session.chatSessionId,
+      userId: session.userId,
+      context: session.context ?? undefined,
+      nombre: nombreSnapshot ?? undefined,
+      correo: correoSnapshot ?? undefined,
+      reason: reasonSnapshot ?? undefined,
+    });
+
+    await this.emitBotMessage(
+      session,
+      'Entendido. Puedes seguir preguntándome lo que necesites. 😊',
+    );
+  }
+
+  /**
+   * Paso 3: recibe nombre → pide correo.
+   */
+  private async handleEscalationNombre(session: SessionState, nombre: string) {
+    const trimmed = nombre.trim();
+    const nameRegex = /^[a-záéíóúüñA-ZÁÉÍÓÚÜÑ][a-záéíóúüñA-ZÁÉÍÓÚÜÑ\s-]*$/;
+    const words = trimmed.split(/\s+/).filter(Boolean);
+    if (!nameRegex.test(trimmed) || words.length < 2) {
+      await this.emitBotMessage(
+        session,
+        'No reconocí un nombre completo 😊 ¿Puedes escribir tu **nombre y apellido**?',
+      );
+      return;
+    }
+    session.escalationNombre = trimmed;
+
+    // Si correo y motivo ya están llenos (edición), volver directo a confirmación
+    if (session.escalationCorreo && session.escalationReason) {
+      session.escalationState = 'awaiting_confirmation';
+      this.server.to(session.chatSessionId).emit('show-confirmation', {
+        nombre: session.escalationNombre,
+        correo: session.escalationCorreo,
+        motivo: session.escalationReason,
+      });
+      return;
+    }
+
+    session.escalationState = 'awaiting_correo';
+    await this.emitBotMessage(
+      session,
+      `Gracias, ${session.escalationNombre}. ¿Cuál es tu **correo electrónico**?`,
+    );
+  }
+
+  /**
+   * Paso 4: recibe correo → pide motivo/descripción.
+   */
+  private async handleEscalationCorreo(session: SessionState, correo: string) {
+    const trimmed = correo.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmed)) {
+      await this.emitBotMessage(
+        session,
+        'Ese correo no parece válido 📧 ¿Puedes verificarlo? Ejemplo: tucorreo@gmail.com',
+      );
+      return;
+    }
+    session.escalationCorreo = trimmed;
+
+    // Si el motivo ya está lleno (edición), volver directo a confirmación
+    if (session.escalationReason) {
+      session.escalationState = 'awaiting_confirmation';
+      this.server.to(session.chatSessionId).emit('show-confirmation', {
+        nombre: session.escalationNombre,
+        correo: session.escalationCorreo,
+        motivo: session.escalationReason,
+      });
+      return;
+    }
+
+    session.escalationState = 'awaiting_reason';
+    await this.emitBotMessage(
+      session,
+      'Por último, describe brevemente tu consulta o el motivo de tu contacto.',
+    );
+  }
+
+  /**
+   * Paso 5: recibe motivo → valida y solicita confirmación al usuario.
    */
   private async handleEscalationReason(session: SessionState, reason: string) {
+    const trimmed = reason.trim();
+    if (trimmed.length < 10) {
+      await this.emitBotMessage(
+        session,
+        '¿Puedes contarme un poco más sobre tu consulta? 😊',
+      );
+      return;
+    }
+    session.escalationReason = trimmed;
+    session.escalationState = 'awaiting_confirmation';
+    this.server.to(session.chatSessionId).emit('show-confirmation', {
+      nombre: session.escalationNombre,
+      correo: session.escalationCorreo,
+      motivo: session.escalationReason,
+    });
+  }
+
+  /**
+   * Paso 6: usuario confirmó datos → persiste en BD y notifica a n8n.
+   */
+  private async completeEscalation(session: SessionState) {
     session.escalationState = 'done';
 
     try {
       const conversation = await this.chatService.escalateConversation(
         session.userId,
-        reason.trim(),
+        session.escalationReason!,
         session.history,
         session.conversationId,
+        session.escalationNombre ?? undefined,
+        session.escalationCorreo ?? undefined,
+        session.context ?? undefined,
       );
 
       session.persisting = true;
       session.conversationId = conversation.codConversation;
 
-      // Unir todos los sockets al room persistido
       for (const socketId of session.sockets) {
         const s = this.server.sockets.sockets.get(socketId);
         if (s) s.join(conversation.codConversation);
       }
 
-      // Notificar al front (puede usar esto para cambiar UI si quiere)
       this.server.to(session.chatSessionId).emit('chat-escalated', {
         conversationId: conversation.codConversation,
       });
 
-      // Confirmación al usuario con canales de contacto
-      await this.emitBotMessage(
-        session,
-        `✅ **Tu consulta ha sido registrada.**\n\n` +
-          `Un asesor revisará tu caso a la brevedad. Puedes contactarnos directamente por:\n\n` +
-          `📱 **WhatsApp:** ${ESCALATION_CHANNELS.whatsapp}\n` +
-          `📧 **Correo:** ${ESCALATION_CHANNELS.email}\n\n` +
-          `_Menciona tu consulta al contactarnos para una atención más rápida._`,
+      const ctx = (session.context ?? 'posgrados') as ChannelContext;
+      const intent =
+        ctx === ChannelContext.MESA_AYUDA ? session.helpdeskIntent : null;
+
+      const channel = await this.supportChannelsService.findByContextAndIntent(
+        ctx,
+        intent,
       );
-    } catch {
-      await this.emitBotMessage(
-        session,
-        '⚠️ Ocurrió un error al registrar tu consulta. Por favor intenta de nuevo o contáctanos directamente.',
+
+      const label =
+        ctx === ChannelContext.MESA_AYUDA ? 'Mesa de Ayuda' : 'Posgrados';
+      const verb = ctx === ChannelContext.MESA_AYUDA ? 'solicitud' : 'consulta';
+
+      if (channel) {
+        await this.emitBotMessage(
+          session,
+          `✅ **Tu ${verb} ha sido registrada.**\n\nUn agente de **${label}** te atenderá pronto.\n\n📱 **WhatsApp:** ${channel.whatsapp}\n📧 **Correo:** ${channel.email}`,
+        );
+      } else {
+        await this.emitBotMessage(
+          session,
+          `✅ **Tu ${verb} ha sido registrada.**\n\nUn agente de **${label}** se pondrá en contacto contigo a la brevedad.`,
+        );
+      }
+
+      await this.n8nService.notifyEscalation('escalation_done', {
+        chatSessionId: session.chatSessionId,
+        userId: session.userId,
+        conversationId: conversation.codConversation,
+        context: session.context ?? undefined,
+        reason: session.escalationReason!,
+        nombre: session.escalationNombre ?? undefined,
+        correo: session.escalationCorreo ?? undefined,
+        channelWhatsapp: channel?.whatsapp,
+        channelEmail: channel?.email,
+      });
+    } catch (err) {
+      console.error(
+        '[completeEscalation] Error al escalar:',
+        err instanceof Error ? err.message : err,
       );
-      // Permitir reintento
       session.escalationState = 'none';
+    }
+  }
+
+  /**
+   * Paso 6b: maneja la respuesta del usuario en la pantalla de confirmación.
+   */
+  private async handleEscalationConfirmation(
+    session: SessionState,
+    optionId: string | undefined,
+  ) {
+    if (optionId === 'confirm') {
+      await this.completeEscalation(session);
+    } else if (optionId === 'edit_nombre') {
+      session.escalationState = 'awaiting_nombre';
+      await this.emitBotMessage(session, '¿Cuál es tu nombre completo?');
+    } else if (optionId === 'edit_correo') {
+      session.escalationState = 'awaiting_correo';
+      await this.emitBotMessage(session, '¿Cuál es tu correo electrónico?');
+    } else if (optionId === 'edit_motivo') {
+      session.escalationState = 'awaiting_reason';
+      await this.emitBotMessage(session, '¿Cuál es el motivo de tu consulta?');
+    } else if (optionId === 'cancel') {
+      await this.handleEscalationDeclined(session);
     }
   }
 
@@ -257,6 +510,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleConnection(socket: Socket) {
     const userId = socket.handshake.auth?.userId;
     const tabId = socket.handshake.auth?.tabId;
+    const authContext = socket.handshake.auth?.context as
+      | ChatContext
+      | undefined;
 
     if (!userId || !tabId) {
       socket.emit('session-error', {
@@ -268,6 +524,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const session = this.getOrCreateSession(tabId, userId);
+
+    if (authContext && !session.context) {
+      session.context = authContext;
+    }
 
     socket.data.userId = userId;
     socket.data.tabId = tabId;
@@ -284,12 +544,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (!session.welcomeSent) {
       session.welcomeSent = true;
+      const welcomeButtons = await this.buildWelcomeButtons(session.context);
       socket.emit('on-message', {
         userId: 'bot',
-        name: 'Asistente Virtual',
+        name: WELCOME_BOT_NAME,
         sender: 'bot',
-        message: 'Hola 👋 ¿En qué puedo ayudarte?',
+        message: this.buildWelcomeMessage(session.context),
         conversationId: session.conversationId ?? null,
+        ...(welcomeButtons.length ? { buttons: welcomeButtons } : {}),
       });
     }
   }
@@ -328,7 +590,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() body: IncomingClientMessage,
     @ConnectedSocket() client: Socket,
   ) {
-    const { message, meta } = this.normalizeIncoming(body);
+    const { message, context, meta } = this.normalizeIncoming(body);
     if (!message?.trim()) return;
 
     const userId = client.data.userId as string;
@@ -346,11 +608,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    if (context && !session.context) {
+      session.context = context;
+    }
+
+    if (message.startsWith(CONTEXT_SELECTED_PREFIX)) return;
+
+    if (message === '__show_menu__') {
+      await this.emitBotMessage(
+        session,
+        this.buildWelcomeMessage(session.context),
+        await this.buildWelcomeButtons(session.context),
+      );
+      return;
+    }
+
     const isFirstTurn = !session.firstUserMessageSeen;
     session.firstUserMessageSeen = true;
     this.touchSession(session);
 
-    // Emitir mensaje del usuario
+    // Emitir mensaje del usuario al room
     const userPayload = {
       userId,
       name: 'Usuario',
@@ -383,26 +660,72 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(chatSessionId).emit('on-message', userPayload);
     }
 
-    // ── Camino B: usuario toca el botón "Hablar con un asesor" ──────────
-    // El front envía meta.optionId === 'escalate'.
-    // Se intercepta aquí antes de pasar a n8n.
+    // ── Botón "Hablar con un asesor" (petición directa) ─────────────────
+    // El usuario ya expresó su intención — saltar confirmación e ir directo a nombre
     if (meta?.optionId === 'escalate') {
-      await this.startEscalationFlow(session);
+      if (session.escalationState === 'none') {
+        session.escalationState = 'pending';
+        await this.handleEscalationConfirmed(session);
+      }
       return;
     }
 
-    // ── Flujo de escalado en curso: recoger motivo del usuario ───────────
-    if (session.escalationState === 'awaiting_reason') {
+    // ── Máquina de estados del escalado ──────────────────────────────────
+    const state = session.escalationState;
+
+    // Esperando decisión sí/no
+    if (state === 'pending') {
+      const msg = message.trim().toLowerCase();
+      const confirmed =
+        meta?.optionId === 'escalate_yes' ||
+        ['si', 'sí', 'yes', 'quiero', 'de acuerdo', 'ok', 'claro'].includes(
+          msg,
+        );
+      const declined =
+        meta?.optionId === 'escalate_no' ||
+        ['no', 'no gracias', 'nope', 'cancelar'].includes(msg);
+
+      if (confirmed) {
+        await this.handleEscalationConfirmed(session);
+      } else if (declined) {
+        await this.handleEscalationDeclined(session);
+      } else {
+        // Respuesta ambigua — volver a preguntar
+        await this.emitBotMessage(
+          session,
+          '¿Deseas que te compartamos los canales de contacto directo? Responde **Sí** o **No**.',
+        );
+      }
+      return;
+    }
+
+    if (state === 'awaiting_nombre') {
+      await this.handleEscalationNombre(session, message);
+      return;
+    }
+
+    if (state === 'awaiting_correo') {
+      await this.handleEscalationCorreo(session, message);
+      return;
+    }
+
+    if (state === 'awaiting_reason') {
       await this.handleEscalationReason(session, message);
       return;
     }
 
-    // ── Flujo normal: delegar a n8n ──────────────────────────────────────
+    if (state === 'awaiting_confirmation') {
+      await this.handleEscalationConfirmation(session, meta?.optionId);
+      return;
+    }
+
+    // ── Flujo normal: delegar a n8n ───────────────────────────────────────
     await this.n8nService.sendMessage({
       chatSessionId,
       userId,
       message,
       isFirstTurn,
+      context: session.context ?? undefined,
       meta,
     });
   }
@@ -415,9 +738,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     chatSessionId: string;
     message: string;
     resolved: boolean;
-    context?: 'posgrados' | 'mesa_ayuda';
+    context?: ChatContext;
+    intent?: string;
+    buttons?: Array<{ label: string; message?: string; url?: string }>;
   }) {
-    const { chatSessionId, message, resolved } = data;
+    const { chatSessionId, message, resolved, intent, buttons } = data;
 
     const sockets = await this.server.in(chatSessionId).fetchSockets();
     if (!sockets.length) return;
@@ -428,11 +753,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.touchSession(session);
 
-    // Emitir la respuesta del bot al cliente
-    await this.emitBotMessage(session, message);
+    // Guardar el intent activo para usarlo en la escalación
+    if (intent) session.helpdeskIntent = intent;
 
-    // ── Camino A: n8n determinó que la consulta NO fue resuelta ──────────
-    // Solo iniciamos el flujo si la sesión no fue escalada ya.
+    await this.emitBotMessage(session, message, buttons);
+
+    // Camino A: n8n no resolvió → iniciar flujo de escalado
     if (!resolved && session.escalationState === 'none') {
       await this.startEscalationFlow(session);
     }

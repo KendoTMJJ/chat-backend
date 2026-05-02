@@ -23,12 +23,17 @@ export class Conversation {
   @Column({ type: 'varchar', nullable: true })
   userId: string;
 
-  /**
-   * Motivo que el usuario describió al pedir escalado.
-   * Solo se rellena cuando status = ESCALATED.
-   */
+  @Column({ type: 'varchar', nullable: true })
+  nombre: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  correo: string | null;
+
   @Column({ type: 'varchar', nullable: true })
   title: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  context: string | null;
 
   @Column({
     type: 'enum',

@@ -7,5 +7,6 @@ import { ChatModule } from 'src/chat/chat.module';
   imports: [ChatModule],
   controllers: [AdminController],
   providers: [AdminService],
+  exports: [AdminService],
 })
 export class AdminModule {}
