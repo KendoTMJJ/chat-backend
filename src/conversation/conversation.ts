@@ -18,16 +18,16 @@ export enum ConversationStatus {
 @Entity('Conversations', { schema: 'public' })
 export class Conversation {
   @PrimaryGeneratedColumn('uuid')
-  codConversation: string;
+  id: string;
 
   @Column({ type: 'varchar', nullable: true })
   userId: string;
 
   @Column({ type: 'varchar', nullable: true })
-  nombre: string | null;
+  name: string | null;
 
   @Column({ type: 'varchar', nullable: true })
-  correo: string | null;
+  email: string | null;
 
   @Column({ type: 'varchar', nullable: true })
   title: string | null;

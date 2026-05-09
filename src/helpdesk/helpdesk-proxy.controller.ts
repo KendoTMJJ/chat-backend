@@ -8,15 +8,26 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../admin-auth/jwt/jwt-auth.guard';
 import { AdminGuard } from '../admin-auth/jwt/admin.guard';
 import { HelpdeskProxyService } from './helpdesk-proxy.service';
 import { CreateHelpdeskCategoryDto } from './dto/create-helpdesk-response.dto';
 import { UpdateHelpdeskCategoryDto } from './dto/update-helpdesk-response.dto';
+
+interface MulterFile {
+  buffer: Buffer;
+  originalname: string;
+  mimetype: string;
+  size: number;
+}
 
 @Controller('admin/helpdesk')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -27,6 +38,11 @@ export class HelpdeskProxyController {
   @Get('categories')
   list(@Query('intent') intent?: string) {
     return this.service.list(intent);
+  }
+
+  @Get('categories/intents')
+  listIntents() {
+    return this.service.listPublic();
   }
 
   @Get('categories/:id')
@@ -50,5 +66,24 @@ export class HelpdeskProxyController {
   @Delete('categories/:id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.service.remove(id);
+  }
+
+  @Post('categories/:id/document')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  uploadDocument(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: MulterFile,
+  ) {
+    return this.service.uploadDocument(
+      id,
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
+  }
+
+  @Delete('categories/:id/document')
+  deleteDocument(@Param('id', ParseIntPipe) id: number) {
+    return this.service.deleteDocument(id);
   }
 }

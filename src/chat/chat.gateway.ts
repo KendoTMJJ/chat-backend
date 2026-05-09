@@ -36,19 +36,19 @@ type IncomingClientMessage =
 /**
  * Estados del flujo de escalado en una sesión:
  *
- * 'none'             → flujo normal, sin escalado en curso
- * 'pending'          → se emitió show-escalate-button, esperando decisión del usuario
- * 'awaiting_nombre'  → usuario confirmó escalar, esperando que escriba su nombre
- * 'awaiting_correo'  → nombre recibido, esperando correo
- * 'awaiting_reason'        → nombre y correo recibidos, esperando motivo/descripción
+ * 'none'                  → flujo normal, sin escalado en curso
+ * 'pending'               → se emitió show-escalate-button o se preguntó Sí/No, esperando decisión del usuario
+ * 'awaiting_name'         → usuario confirmó escalar, esperando que escriba su nombre
+ * 'awaiting_email'        → nombre recibido, esperando correo
+ * 'awaiting_reason'       → nombre y correo recibidos, esperando motivo/descripción
  * 'awaiting_confirmation' → todos los datos recolectados, esperando confirmación del usuario
  * 'done'                  → ya se escaló, no volver a escalar en esta sesión
  */
 type EscalationState =
   | 'none'
   | 'pending'
-  | 'awaiting_nombre'
-  | 'awaiting_correo'
+  | 'awaiting_name'
+  | 'awaiting_email'
   | 'awaiting_reason'
   | 'awaiting_confirmation'
   | 'done';
@@ -71,8 +71,8 @@ type SessionState = {
 
   // ── Escalado ──────────────────────────────────────────────────────────
   escalationState: EscalationState;
-  escalationNombre: string | null;
-  escalationCorreo: string | null;
+  escalationName: string | null;
+  escalationEmail: string | null;
   escalationReason: string | null;
 
   // Intent activo del helpdesk — se actualiza con cada bot-reply de mesa_ayuda
@@ -100,12 +100,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return Date.now();
   }
 
-  private async buildWelcomeButtons(context?: ChatContext | null): Promise<Array<{
-    label: string;
-    message?: string;
-    url?: string;
-    optionId?: string;
-  }>> {
+  private async buildWelcomeButtons(context?: ChatContext | null): Promise<
+    Array<{
+      label: string;
+      message?: string;
+      url?: string;
+      optionId?: string;
+    }>
+  > {
     if (context === 'posgrados') {
       return [
         {
@@ -220,8 +222,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       history: [],
       context: null,
       escalationState: 'none',
-      escalationNombre: null,
-      escalationCorreo: null,
+      escalationName: null,
+      escalationEmail: null,
       escalationReason: null,
       helpdeskIntent: null,
     };
@@ -281,7 +283,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * Pide el nombre.
    */
   private async handleEscalationConfirmed(session: SessionState) {
-    session.escalationState = 'awaiting_nombre';
+    session.escalationState = 'awaiting_name';
     await this.emitBotMessage(
       session,
       'Claro 😊, con gusto te ayudo. Antes de indicarte los canales de comunicación, ¿me puedes compartir tu **nombre completo**?',
@@ -293,13 +295,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * Volver al flujo normal.
    */
   private async handleEscalationDeclined(session: SessionState) {
-    const nombreSnapshot = session.escalationNombre;
-    const correoSnapshot = session.escalationCorreo;
+    const nameSnapshot = session.escalationName;
+    const emailSnapshot = session.escalationEmail;
     const reasonSnapshot = session.escalationReason;
 
     session.escalationState = 'none';
-    session.escalationNombre = null;
-    session.escalationCorreo = null;
+    session.escalationName = null;
+    session.escalationEmail = null;
     session.escalationReason = null;
 
     // Notificar a n8n para que restaure el contexto de la sesión (active_snies)
@@ -307,8 +309,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       chatSessionId: session.chatSessionId,
       userId: session.userId,
       context: session.context ?? undefined,
-      nombre: nombreSnapshot ?? undefined,
-      correo: correoSnapshot ?? undefined,
+      name: nameSnapshot ?? undefined,
+      email: emailSnapshot ?? undefined,
       reason: reasonSnapshot ?? undefined,
     });
 
@@ -321,8 +323,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   /**
    * Paso 3: recibe nombre → pide correo.
    */
-  private async handleEscalationNombre(session: SessionState, nombre: string) {
-    const trimmed = nombre.trim();
+  private async handleEscalationName(session: SessionState, name: string) {
+    const trimmed = name.trim();
     const nameRegex = /^[a-záéíóúüñA-ZÁÉÍÓÚÜÑ][a-záéíóúüñA-ZÁÉÍÓÚÜÑ\s-]*$/;
     const words = trimmed.split(/\s+/).filter(Boolean);
     if (!nameRegex.test(trimmed) || words.length < 2) {
@@ -332,31 +334,31 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
       return;
     }
-    session.escalationNombre = trimmed;
+    session.escalationName = trimmed;
 
-    // Si correo y motivo ya están llenos (edición), volver directo a confirmación
-    if (session.escalationCorreo && session.escalationReason) {
+    // Si email y motivo ya están llenos (edición), volver directo a confirmación
+    if (session.escalationEmail && session.escalationReason) {
       session.escalationState = 'awaiting_confirmation';
       this.server.to(session.chatSessionId).emit('show-confirmation', {
-        nombre: session.escalationNombre,
-        correo: session.escalationCorreo,
-        motivo: session.escalationReason,
+        name: session.escalationName,
+        email: session.escalationEmail,
+        reason: session.escalationReason,
       });
       return;
     }
 
-    session.escalationState = 'awaiting_correo';
+    session.escalationState = 'awaiting_email';
     await this.emitBotMessage(
       session,
-      `Gracias, ${session.escalationNombre}. ¿Cuál es tu **correo electrónico**?`,
+      `Gracias, ${session.escalationName}. ¿Cuál es tu **correo electrónico**?`,
     );
   }
 
   /**
-   * Paso 4: recibe correo → pide motivo/descripción.
+   * Paso 4: recibe email → pide motivo/descripción.
    */
-  private async handleEscalationCorreo(session: SessionState, correo: string) {
-    const trimmed = correo.trim().toLowerCase();
+  private async handleEscalationEmail(session: SessionState, email: string) {
+    const trimmed = email.trim().toLowerCase();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(trimmed)) {
       await this.emitBotMessage(
@@ -365,15 +367,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
       return;
     }
-    session.escalationCorreo = trimmed;
+    session.escalationEmail = trimmed;
 
     // Si el motivo ya está lleno (edición), volver directo a confirmación
     if (session.escalationReason) {
       session.escalationState = 'awaiting_confirmation';
       this.server.to(session.chatSessionId).emit('show-confirmation', {
-        nombre: session.escalationNombre,
-        correo: session.escalationCorreo,
-        motivo: session.escalationReason,
+        name: session.escalationName,
+        email: session.escalationEmail,
+        reason: session.escalationReason,
       });
       return;
     }
@@ -400,9 +402,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     session.escalationReason = trimmed;
     session.escalationState = 'awaiting_confirmation';
     this.server.to(session.chatSessionId).emit('show-confirmation', {
-      nombre: session.escalationNombre,
-      correo: session.escalationCorreo,
-      motivo: session.escalationReason,
+      name: session.escalationName,
+      email: session.escalationEmail,
+      reason: session.escalationReason,
     });
   }
 
@@ -418,21 +420,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         session.escalationReason!,
         session.history,
         session.conversationId,
-        session.escalationNombre ?? undefined,
-        session.escalationCorreo ?? undefined,
+        session.escalationName ?? undefined,
+        session.escalationEmail ?? undefined,
         session.context ?? undefined,
       );
 
       session.persisting = true;
-      session.conversationId = conversation.codConversation;
+      session.conversationId = conversation.id;
 
       for (const socketId of session.sockets) {
         const s = this.server.sockets.sockets.get(socketId);
-        if (s) s.join(conversation.codConversation);
+        if (s) s.join(conversation.id);
       }
 
       this.server.to(session.chatSessionId).emit('chat-escalated', {
-        conversationId: conversation.codConversation,
+        conversationId: conversation.id,
       });
 
       const ctx = (session.context ?? 'posgrados') as ChannelContext;
@@ -448,26 +450,27 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         ctx === ChannelContext.MESA_AYUDA ? 'Mesa de Ayuda' : 'Posgrados';
       const verb = ctx === ChannelContext.MESA_AYUDA ? 'solicitud' : 'consulta';
 
-      if (channel) {
-        await this.emitBotMessage(
-          session,
-          `✅ **Tu ${verb} ha sido registrada.**\n\nUn agente de **${label}** te atenderá pronto.\n\n📱 **WhatsApp:** ${channel.whatsapp}\n📧 **Correo:** ${channel.email}`,
-        );
-      } else {
-        await this.emitBotMessage(
-          session,
-          `✅ **Tu ${verb} ha sido registrada.**\n\nUn agente de **${label}** se pondrá en contacto contigo a la brevedad.`,
-        );
-      }
+      const contactLines: string[] = [];
+      if (channel?.whatsapp) contactLines.push(`📱 **WhatsApp:** ${channel.whatsapp}`);
+      if (channel?.email) contactLines.push(`📧 **Correo:** ${channel.email}`);
+
+      const contactBlock = contactLines.length
+        ? `\n\n${contactLines.join('\n')}`
+        : '';
+
+      await this.emitBotMessage(
+        session,
+        `✅ **Tu ${verb} ha sido registrada.**\n\nUn agente de **${label}** te atenderá pronto.${contactBlock}`,
+      );
 
       await this.n8nService.notifyEscalation('escalation_done', {
         chatSessionId: session.chatSessionId,
         userId: session.userId,
-        conversationId: conversation.codConversation,
+        conversationId: conversation.id,
         context: session.context ?? undefined,
         reason: session.escalationReason!,
-        nombre: session.escalationNombre ?? undefined,
-        correo: session.escalationCorreo ?? undefined,
+        name: session.escalationName ?? undefined,
+        email: session.escalationEmail ?? undefined,
         channelWhatsapp: channel?.whatsapp,
         channelEmail: channel?.email,
       });
@@ -489,13 +492,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     if (optionId === 'confirm') {
       await this.completeEscalation(session);
-    } else if (optionId === 'edit_nombre') {
-      session.escalationState = 'awaiting_nombre';
+    } else if (optionId === 'edit_name') {
+      session.escalationState = 'awaiting_name';
       await this.emitBotMessage(session, '¿Cuál es tu nombre completo?');
-    } else if (optionId === 'edit_correo') {
-      session.escalationState = 'awaiting_correo';
+    } else if (optionId === 'edit_email') {
+      session.escalationState = 'awaiting_email';
       await this.emitBotMessage(session, '¿Cuál es tu correo electrónico?');
-    } else if (optionId === 'edit_motivo') {
+    } else if (optionId === 'edit_reason') {
       session.escalationState = 'awaiting_reason';
       await this.emitBotMessage(session, '¿Cuál es el motivo de tu consulta?');
     } else if (optionId === 'cancel') {
@@ -699,13 +702,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    if (state === 'awaiting_nombre') {
-      await this.handleEscalationNombre(session, message);
+    if (state === 'awaiting_name') {
+      await this.handleEscalationName(session, message);
       return;
     }
 
-    if (state === 'awaiting_correo') {
-      await this.handleEscalationCorreo(session, message);
+    if (state === 'awaiting_email') {
+      await this.handleEscalationEmail(session, message);
       return;
     }
 
@@ -758,8 +761,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     await this.emitBotMessage(session, message, buttons);
 
-    // Camino A: n8n no resolvió → iniciar flujo de escalado
-    if (!resolved && session.escalationState === 'none') {
+    if (session.escalationState !== 'none') return;
+
+    // n8n no resolvió → preguntar si quiere canales de contacto
+    if (!resolved) {
       await this.startEscalationFlow(session);
     }
   }

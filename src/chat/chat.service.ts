@@ -11,8 +11,8 @@ export interface ConversationSummary {
   userId: string;
   status: ConversationStatus;
   title: string | null;
-  nombre: string | null;
-  correo: string | null;
+  name: string | null;
+  email: string | null;
   context: string | null;
   startedAt: Date;
   updatedAt: Date;
@@ -51,7 +51,7 @@ export class ChatService {
 
     if (diffMinutes > this.TIMEOUT_MINUTES) {
       await this.conversationRepository.update(
-        lastConversation.codConversation,
+        lastConversation.id,
         { status: ConversationStatus.EXPIRED },
       );
       return this.createNewConversation(userId);
@@ -82,15 +82,15 @@ export class ChatService {
     title: string,
     history: Array<{ userId: string; sender: 'user' | 'bot'; message: string }>,
     existingConversationId?: string | null,
-    nombre?: string,
-    correo?: string,
+    name?: string,
+    email?: string,
     context?: string,
   ): Promise<Conversation> {
     let conversation: Conversation;
 
     if (existingConversationId) {
       const found = await this.conversationRepository.findOne({
-        where: { codConversation: existingConversationId },
+        where: { id: existingConversationId },
       });
       conversation = found ?? (await this.createNewConversation(userId));
     } else {
@@ -98,7 +98,7 @@ export class ChatService {
       conversation = await this.createNewConversation(userId);
       for (const msg of history) {
         await this.saveMessage(
-          conversation.codConversation,
+          conversation.id,
           msg.userId,
           msg.sender,
           msg.message,
@@ -106,10 +106,10 @@ export class ChatService {
       }
     }
 
-    await this.conversationRepository.update(conversation.codConversation, {
+    await this.conversationRepository.update(conversation.id, {
       title,
-      ...(nombre !== undefined && { nombre }),
-      ...(correo !== undefined && { correo }),
+      ...(name !== undefined && { name }),
+      ...(email !== undefined && { email }),
       ...(context !== undefined && { context }),
       status: ConversationStatus.ESCALATED,
       lastActivityAt: new Date(),
@@ -118,8 +118,8 @@ export class ChatService {
     return {
       ...conversation,
       title,
-      nombre: nombre ?? null,
-      correo: correo ?? null,
+      name: name ?? null,
+      email: email ?? null,
       status: ConversationStatus.ESCALATED,
     };
   }
@@ -135,7 +135,7 @@ export class ChatService {
   ): Promise<Message> {
     try {
       const msg = this.messageRepository.create({
-        conversation: { codConversation: conversationId },
+        conversation: { id: conversationId },
         userId,
         sender,
         message,
@@ -159,19 +159,19 @@ export class ChatService {
   // =============================
   // 📜 Historial
   // =============================
-  async getHistory(codConversation: string) {
+  async getHistory(conversationId: string) {
     return this.messageRepository.find({
-      where: { conversation: { codConversation } },
-      order: { createAt: 'ASC' },
+      where: { conversation: { id: conversationId } },
+      order: { createdAt: 'ASC' },
     });
   }
 
   // =============================
   // 🔎 Validar conversación activa
   // =============================
-  async validateConversation(codConversation: string) {
+  async validateConversation(conversationId: string) {
     const conversation = await this.conversationRepository.findOne({
-      where: { codConversation, status: ConversationStatus.ACTIVE },
+      where: { id: conversationId, status: ConversationStatus.ACTIVE },
     });
 
     if (!conversation) return null;
@@ -181,7 +181,7 @@ export class ChatService {
     const diffMinutes = (now - new Date(lastActivity).getTime()) / (1000 * 60);
 
     if (diffMinutes > this.TIMEOUT_MINUTES) {
-      await this.conversationRepository.update(codConversation, {
+      await this.conversationRepository.update(conversationId, {
         status: ConversationStatus.EXPIRED,
       });
       return null;
@@ -202,18 +202,18 @@ export class ChatService {
       conversations.map(async (conversation) => {
         const lastMessage = await this.messageRepository.findOne({
           where: {
-            conversation: { codConversation: conversation.codConversation },
+            conversation: { id: conversation.id },
           },
-          order: { createAt: 'DESC' },
+          order: { createdAt: 'DESC' },
         });
 
         return {
-          conversationId: conversation.codConversation,
+          conversationId: conversation.id,
           userId: conversation.userId,
           status: conversation.status,
           title: conversation.title ?? null,
-          nombre: conversation.nombre ?? null,
-          correo: conversation.correo ?? null,
+          name: conversation.name ?? null,
+          email: conversation.email ?? null,
           context: conversation.context ?? null,
           startedAt: conversation.startedAt,
           updatedAt: conversation.lastActivityAt,
@@ -246,7 +246,7 @@ export class ChatService {
   // =============================
   async deleteConversation(conversationId: string): Promise<void> {
     await this.messageRepository.delete({
-      conversation: { codConversation: conversationId },
+      conversation: { id: conversationId },
     });
     await this.conversationRepository.delete(conversationId);
   }

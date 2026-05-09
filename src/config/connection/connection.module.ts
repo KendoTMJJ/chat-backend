@@ -1,5 +1,4 @@
 import { Global, Module } from '@nestjs/common';
-import { error } from 'console';
 import { Admin } from 'src/admin/entities/admin.entity';
 import { Conversation } from 'src/conversation/conversation';
 import { Message } from 'src/message/message';
@@ -24,8 +23,8 @@ import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
             username: String(process.env.DB_USER),
             database: String(process.env.DB_NAME),
             password: String(process.env.DB_PASSWORD),
-            synchronize: true,
-            logging: true,
+            synchronize: false,
+            logging: false,
             namingStrategy: new SnakeNamingStrategy(),
             entities: [Message, Conversation, SupportChannel, Admin],
             // ssl: false,

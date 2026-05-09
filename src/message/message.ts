@@ -8,10 +8,10 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 
-@Entity('Mensajes', { schema: 'public' })
+@Entity('Messages', { schema: 'public' })
 export class Message {
   @PrimaryGeneratedColumn('uuid')
-  codMessage: string;
+  id: string;
 
   @Column({ type: 'varchar', nullable: false })
   userId: string;
@@ -23,7 +23,7 @@ export class Message {
   message: string;
 
   @CreateDateColumn()
-  createAt: Date;
+  createdAt: Date;
 
   @ManyToOne(() => Conversation, (conversation) => conversation.messages, {
     onDelete: 'CASCADE',

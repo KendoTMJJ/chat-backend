@@ -8,8 +8,4 @@ export class CreateHelpdeskCategoryDto {
   @IsOptional()
   @IsString()
   description?: string | null;
-
-  @IsOptional()
-  @IsString()
-  pdf_url?: string | null;
 }

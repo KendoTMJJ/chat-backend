@@ -44,8 +44,8 @@ export class N8nService {
       conversationId?: string | null;
       context?: ChatContext;
       reason?: string;
-      nombre?: string;
-      correo?: string;
+      name?: string;
+      email?: string;
       channelWhatsapp?: string;
       channelEmail?: string;
     },

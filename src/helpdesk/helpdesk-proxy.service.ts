@@ -60,7 +60,7 @@ export class HelpdeskProxyService {
     }
   }
 
-  async listPublic(): Promise<Array<{ intent: string; display_label: string; description: string | null; pdf_url: string | null }>> {
+  async listPublic(): Promise<Array<{ intent: string; display_label: string; description: string | null; has_document: boolean; document_url: string | null }>> {
     try {
       const res = await fetch(`${this.baseUrl}/helpdesk/categories`);
       if (!res.ok) return [];
@@ -90,5 +90,37 @@ export class HelpdeskProxyService {
 
   remove(id: number) {
     return this.request('DELETE', `/helpdesk/admin/categories/${id}`);
+  }
+
+  async uploadDocument(id: number, buffer: Buffer, filename: string, mimetype: string): Promise<unknown> {
+    const url = `${this.baseUrl}/helpdesk/admin/categories/${id}/document`;
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(buffer)], { type: mimetype }), filename);
+
+    this.logger.debug(`→ POST ${url} (file: ${filename}, ${buffer.length} bytes)`);
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'x-internal-key': this.internalKey },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new InternalServerErrorException(
+          `RAG Backend respondió ${res.status} al subir documento`,
+        );
+      }
+      return data;
+    } catch (err) {
+      if (err instanceof InternalServerErrorException) throw err;
+      throw new InternalServerErrorException(
+        `Error subiendo documento: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  deleteDocument(id: number) {
+    return this.request('DELETE', `/helpdesk/admin/categories/${id}/document`);
   }
 }
