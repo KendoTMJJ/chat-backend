@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { sign } from 'jsonwebtoken';
 import * as bcrypt from 'bcrypt';
 import * as nodemailer from 'nodemailer';
@@ -6,6 +6,8 @@ import { AdminService } from 'src/admin/admin.service';
 
 @Injectable()
 export class AdminAuthService {
+  private readonly logger = new Logger(AdminAuthService.name);
+
   constructor(private readonly adminService: AdminService) {}
 
   async login(email: string, password: string) {
@@ -35,7 +37,7 @@ export class AdminAuthService {
       process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS;
 
     if (!smtpConfigured) {
-      console.log(`[AdminAuth] Enlace de recuperación (modo dev): ${resetLink}`);
+      this.logger.warn(`SMTP no configurado. Enlace de recuperación (dev): ${resetLink}`);
       return;
     }
 

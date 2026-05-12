@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
   OnApplicationBootstrap,
   UnauthorizedException,
@@ -13,6 +14,7 @@ import { ChangePasswordDto, UpdateProfileDto } from './dto/update-admin.dto';
 
 @Injectable()
 export class AdminService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(AdminService.name);
   private adminRepo: Repository<Admin>;
 
   constructor(dataSource: DataSource) {
@@ -28,8 +30,8 @@ export class AdminService implements OnApplicationBootstrap {
     const name = process.env.ADMIN_NAME || 'Administrador';
 
     if (!email || !plainPassword) {
-      console.warn(
-        '[AdminService] ADMIN_EMAIL o ADMIN_INITIAL_PASSWORD no definidos — admin no creado.',
+      this.logger.warn(
+        'ADMIN_EMAIL o ADMIN_INITIAL_PASSWORD no definidos — admin no creado.',
       );
       return;
     }
@@ -38,7 +40,7 @@ export class AdminService implements OnApplicationBootstrap {
     await this.adminRepo.save(
       this.adminRepo.create({ email, password, name, isActive: true }),
     );
-    console.log(`[AdminService] Admin inicial creado: ${email}`);
+    this.logger.log(`Admin inicial creado: ${email}`);
   }
 
   async findByEmail(email: string): Promise<Admin | null> {

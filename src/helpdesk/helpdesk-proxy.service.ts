@@ -30,9 +30,6 @@ export class HelpdeskProxyService {
       Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
     }
 
-    this.logger.debug(`→ ${method} ${url.toString()}`);
-    if (body) this.logger.debug(`  body: ${JSON.stringify(body)}`);
-
     try {
       const res = await fetch(url.toString(), {
         method,
@@ -41,9 +38,6 @@ export class HelpdeskProxyService {
       });
 
       const data = await res.json();
-
-      this.logger.debug(`← ${res.status} ${url.pathname}`);
-      this.logger.debug(`  response: ${JSON.stringify(data)}`);
 
       if (!res.ok) {
         throw new InternalServerErrorException(
@@ -96,8 +90,6 @@ export class HelpdeskProxyService {
     const url = `${this.baseUrl}/helpdesk/admin/categories/${id}/document`;
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(buffer)], { type: mimetype }), filename);
-
-    this.logger.debug(`→ POST ${url} (file: ${filename}, ${buffer.length} bytes)`);
 
     try {
       const res = await fetch(url, {
